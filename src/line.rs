@@ -78,6 +78,7 @@ pub fn WorldLine(
     let id = line.id;
     let start = line.start;
     let end = line.end;
+    let texture_id = line.texture_id;
 
     let begin_drag = move |event: ev::PointerEvent, is_start: bool| {
         event.prevent_default();
@@ -111,6 +112,9 @@ pub fn WorldLine(
         <div class="line-layer">
             <div
                 class="world-line"
+                class:missing-texture=move || {
+                    texture_id.get().is_none_or(|texture_id| texture_id.is_empty())
+                }
                 class:dragging=move || active_line.get() == Some(id)
                 style:left=move || {
                     let (x, _, _, _) = line_geometry();

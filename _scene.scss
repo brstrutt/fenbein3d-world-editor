@@ -47,6 +47,10 @@
     touch-action: none;
 }
 
+.world-line.missing-texture {
+    background: #c66a2b;
+}
+
 .world-line::before {
     position: absolute;
     inset: -8px 0;
