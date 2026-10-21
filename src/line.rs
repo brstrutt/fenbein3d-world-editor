@@ -232,6 +232,7 @@ pub fn LineInspector(
             }
         });
     };
+    let delete_selected = move |_| delete_selected_line(lines, selected_line);
 
     view! {
         <aside class="line-inspector" hidden=move || selected_line.get().is_none()>
@@ -240,6 +241,14 @@ pub fn LineInspector(
                     <p>"Selected line"</p>
                     <h2>{move || selected().map_or_else(|| "Line".to_owned(), |line| format!("Line {}", line.id + 1))}</h2>
                 </div>
+                <button
+                    class="inspector-delete"
+                    type="button"
+                    aria-label="Delete selected line"
+                    on:click=delete_selected
+                >
+                    "Delete"
+                </button>
                 <button
                     class="inspector-close"
                     type="button"
@@ -334,4 +343,12 @@ pub fn LineInspector(
             </section>
         </aside>
     }
+}
+
+fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Option<usize>>) {
+    let Some(selected_id) = selected_line.get_untracked() else {
+        return;
+    };
+    lines.update(|lines| lines.retain(|line| line.id != selected_id));
+    selected_line.set(None);
 }

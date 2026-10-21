@@ -153,6 +153,23 @@ pub fn WorldScene(
                     />
                 }
             />
+            <svg
+                class="spawn-indicator"
+                viewBox="0 0 24 36"
+                role="img"
+                aria-label="Player spawn point, facing down"
+                style:left=move || {
+                    let (pan_x, _) = scene_offset.get();
+                    format!("calc(50% + {pan_x}px)")
+                }
+                style:top=move || {
+                    let (_, pan_y) = scene_offset.get();
+                    format!("calc(50% + {pan_y}px)")
+                }
+            >
+                <circle cx="12" cy="7" r="4" />
+                <path d="M12 13v15m-6-6 6 6 6-6" />
+            </svg>
         </div>
     }
 }

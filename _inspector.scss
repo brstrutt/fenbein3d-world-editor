@@ -40,6 +40,22 @@
     cursor: pointer;
 }
 
+.inspector-delete {
+    margin-left: auto;
+    padding: 4px 8px;
+    border: 1px solid #c66a5e;
+    border-radius: 3px;
+    background: #fff;
+    color: #9e392d;
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.inspector-delete:hover {
+    background: #fff2f0;
+}
+
 .inspector-close:hover {
     color: #20332c;
 }
