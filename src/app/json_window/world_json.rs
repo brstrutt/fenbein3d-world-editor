@@ -1,6 +1,7 @@
 use crate::line::Line;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 #[derive(Deserialize)]
 struct JsonWorld {
@@ -23,6 +24,7 @@ struct JsonPoint {
 pub(super) struct ImportedWorld {
     pub lines: Vec<Line>,
     pub textures: Vec<String>,
+    pub wall_data_by_line_id: HashMap<usize, Value>,
     pub source_json: Value,
 }
 
@@ -33,6 +35,14 @@ pub(super) fn parse_world_json(
     let source_json: Value = serde_json::from_str(json_text)?;
     let world: JsonWorld = serde_json::from_value(source_json.clone())?;
     let textures = collect_texture_ids(&source_json);
+    let wall_data_by_line_id = source_json
+        .get("walls")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, wall)| (first_line_id + index, wall.clone()))
+        .collect();
     let lines = world
         .walls
         .into_iter()
@@ -50,44 +60,45 @@ pub(super) fn parse_world_json(
     Ok(ImportedWorld {
         lines,
         textures,
+        wall_data_by_line_id,
         source_json,
     })
 }
 
 pub(super) fn serialize_world_with_lines(
     source_json: &Value,
+    wall_data_by_line_id: &HashMap<usize, Value>,
     lines: &[Line],
 ) -> Result<String, String> {
     let mut world = source_json.clone();
-    replace_wall_positions(&mut world, lines)?;
+    replace_walls(&mut world, wall_data_by_line_id, lines)?;
     serde_json::to_string_pretty(&world).map_err(|error| error.to_string())
 }
 
-fn replace_wall_positions(world: &mut Value, lines: &[Line]) -> Result<(), String> {
-    let walls = world
+fn replace_walls(
+    world: &mut Value,
+    wall_data_by_line_id: &HashMap<usize, Value>,
+    lines: &[Line],
+) -> Result<(), String> {
+    world
         .get_mut("walls")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| "The world JSON does not contain a walls array.".to_owned())?;
 
     let updated_walls = lines
         .iter()
-        .enumerate()
-        .map(|(index, line)| update_wall(index, line, walls))
+        .map(|line| update_wall(line, wall_data_by_line_id.get(&line.id)))
         .collect::<Result<Vec<_>, _>>()?;
-    *walls = updated_walls;
+    world["walls"] = Value::Array(updated_walls);
 
     Ok(())
 }
 
-fn update_wall(index: usize, line: &Line, existing_walls: &[Value]) -> Result<Value, String> {
-    let mut wall = existing_walls
-        .get(index)
-        .cloned()
-        .or_else(|| existing_walls.first().map(wall_template_without_paintings))
-        .unwrap_or_else(|| json!({ "texture_id": "" }));
+fn update_wall(line: &Line, wall_data: Option<&Value>) -> Result<Value, String> {
+    let mut wall = wall_data.cloned().unwrap_or_else(|| json!({}));
     let wall_object = wall
         .as_object_mut()
-        .ok_or_else(|| format!("Wall {index} is not a JSON object."))?;
+        .ok_or_else(|| format!("Wall data for line {} is not a JSON object.", line.id))?;
     let ((start_x, start_y), (end_x, end_y)) = line.endpoints_untracked();
 
     wall_object.insert("start".to_owned(), json!({ "x": start_x, "y": start_y }));
@@ -126,19 +137,12 @@ fn add_texture_id(texture_ids: &mut Vec<String>, texture_id: &str) {
     }
 }
 
-fn wall_template_without_paintings(wall: &Value) -> Value {
-    let mut template = wall.clone();
-    if let Some(object) = template.as_object_mut() {
-        object.remove("paintings");
-    }
-    template
-}
-
 #[cfg(test)]
 mod tests {
     use super::{parse_world_json, serialize_world_with_lines};
     use crate::line::Line;
     use serde_json::Value;
+    use std::collections::HashMap;
 
     #[test]
     fn imports_wall_endpoints_and_ignores_other_world_data() {
@@ -188,7 +192,12 @@ mod tests {
         let imported = parse_world_json(json_text, 0).unwrap();
         imported.lines[0].set_endpoints((-4.5, 2.25), (6.0, -7.75));
 
-        let updated = serialize_world_with_lines(&imported.source_json, &imported.lines).unwrap();
+        let updated = serialize_world_with_lines(
+            &imported.source_json,
+            &imported.wall_data_by_line_id,
+            &imported.lines,
+        )
+        .unwrap();
         let updated: Value = serde_json::from_str(&updated).unwrap();
 
         assert_eq!(updated["floor_texture_id"], "floor");
@@ -217,7 +226,12 @@ mod tests {
         imported.lines[0].set_texture_id(Some("brick".to_owned()));
         let lines = [imported.lines[0], new_line];
 
-        let updated = serialize_world_with_lines(&imported.source_json, &lines).unwrap();
+        let updated = serialize_world_with_lines(
+            &imported.source_json,
+            &imported.wall_data_by_line_id,
+            &lines,
+        )
+        .unwrap();
         let updated: Value = serde_json::from_str(&updated).unwrap();
 
         assert_eq!(updated["walls"][0]["texture_id"], "brick");
@@ -225,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn new_walls_are_unselected_and_do_not_copy_paintings() {
+    fn new_walls_are_unselected_and_start_without_wall_metadata() {
         let json_text = r#"{
             "walls": [{
                 "start": { "x": 0.0, "y": 1.0 },
@@ -239,10 +253,82 @@ mod tests {
             .lines
             .push(crate::line::Line::from_endpoints(1, (4.0, 5.0), (6.0, 7.0)));
 
-        let updated = serialize_world_with_lines(&imported.source_json, &imported.lines).unwrap();
+        let updated = serialize_world_with_lines(
+            &imported.source_json,
+            &imported.wall_data_by_line_id,
+            &imported.lines,
+        )
+        .unwrap();
         let updated: Value = serde_json::from_str(&updated).unwrap();
 
         assert_eq!(updated["walls"][1]["texture_id"], "");
         assert!(updated["walls"][1].get("paintings").is_none());
+    }
+
+    #[test]
+    fn deleting_a_line_removes_its_wall_metadata_without_reassigning_it() {
+        let json_text = r#"{
+            "walls": [
+                {
+                    "start": { "x": 0.0, "y": 0.0 },
+                    "end": { "x": 1.0, "y": 0.0 },
+                    "texture_id": "first",
+                    "paintings": [{ "id": "first-art" }]
+                },
+                {
+                    "start": { "x": 0.0, "y": 1.0 },
+                    "end": { "x": 1.0, "y": 1.0 },
+                    "texture_id": "deleted",
+                    "paintings": [
+                        { "id": "deleted-art-1" },
+                        { "id": "deleted-art-2" },
+                        { "id": "deleted-art-3" },
+                        { "id": "deleted-art-4" },
+                        { "id": "deleted-art-5" },
+                        { "id": "deleted-art-6" },
+                        { "id": "deleted-art-7" }
+                    ]
+                },
+                {
+                    "start": { "x": 0.0, "y": 2.0 },
+                    "end": { "x": 1.0, "y": 2.0 },
+                    "texture_id": "last",
+                    "paintings": [{ "id": "last-art" }]
+                }
+            ]
+        }"#;
+        let imported = parse_world_json(json_text, 10).unwrap();
+        let surviving_lines = [imported.lines[0], imported.lines[2]];
+
+        let updated = serialize_world_with_lines(
+            &imported.source_json,
+            &imported.wall_data_by_line_id,
+            &surviving_lines,
+        )
+        .unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+        let walls = updated["walls"].as_array().unwrap();
+
+        assert_eq!(walls.len(), 2);
+        assert_eq!(walls[0]["texture_id"], "first");
+        assert_eq!(walls[0]["paintings"][0]["id"], "first-art");
+        assert_eq!(walls[1]["texture_id"], "last");
+        assert_eq!(walls[1]["paintings"][0]["id"], "last-art");
+        assert!(!updated.to_string().contains("deleted-art-"));
+    }
+
+    #[test]
+    fn new_line_without_wall_metadata_serializes_without_inheriting_other_wall_data() {
+        let source_json: Value = serde_json::from_str(
+            r#"{"walls":[{"start":{"x":0.0,"y":0.0},"end":{"x":1.0,"y":0.0},"texture_id":"first","paintings":[{"id":"art"}]}]}"#,
+        )
+        .unwrap();
+        let new_line = Line::from_endpoints(100, (3.0, 4.0), (5.0, 6.0));
+        let updated =
+            serialize_world_with_lines(&source_json, &HashMap::new(), &[new_line]).unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
+        assert_eq!(updated["walls"][0]["texture_id"], "");
+        assert!(updated["walls"][0].get("paintings").is_none());
     }
 }

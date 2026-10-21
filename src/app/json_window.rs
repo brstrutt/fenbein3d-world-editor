@@ -3,6 +3,7 @@ mod world_json;
 use crate::line::Line;
 use leptos::prelude::*;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use self::world_json::{parse_world_json, serialize_world_with_lines};
 
@@ -20,14 +21,24 @@ pub fn JsonWindow(
     let import_status = RwSignal::new(INITIAL_IMPORT_STATUS.to_owned());
     let json_text = RwSignal::new(String::new());
     let world_json = RwSignal::new(None::<Value>);
+    let wall_data_by_line_id = RwSignal::new(None::<HashMap<usize, Value>>);
 
-    Effect::new(move |_| synchronize_json_text(lines, world_json, json_text, import_status));
+    Effect::new(move |_| {
+        synchronize_json_text(
+            lines,
+            world_json,
+            wall_data_by_line_id,
+            json_text,
+            import_status,
+        )
+    });
 
     let import_json = move |event| {
         import_world_from_text(
             event_target_value(&event),
             lines,
             textures,
+            wall_data_by_line_id,
             next_line_id,
             selected_line,
             json_text,
@@ -83,6 +94,7 @@ pub fn JsonWindow(
 fn synchronize_json_text(
     lines: RwSignal<Vec<Line>>,
     world_json: RwSignal<Option<Value>>,
+    wall_data_by_line_id: RwSignal<Option<HashMap<usize, Value>>>,
     json_text: RwSignal<String>,
     import_status: RwSignal<String>,
 ) {
@@ -94,8 +106,11 @@ fn synchronize_json_text(
     let Some(source_json) = world_json.get_untracked() else {
         return;
     };
+    let Some(wall_data_by_line_id) = wall_data_by_line_id.get_untracked() else {
+        return;
+    };
 
-    match serialize_world_with_lines(&source_json, &current_lines) {
+    match serialize_world_with_lines(&source_json, &wall_data_by_line_id, &current_lines) {
         Ok(updated_json) => json_text.set(updated_json),
         Err(error) => import_status.set(format!("Could not update JSON: {error}")),
     }
@@ -105,6 +120,7 @@ fn import_world_from_text(
     json_text_value: String,
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
+    wall_data_by_line_id: RwSignal<Option<HashMap<usize, Value>>>,
     next_line_id: RwSignal<usize>,
     selected_line: RwSignal<Option<usize>>,
     json_text: RwSignal<String>,
@@ -118,6 +134,7 @@ fn import_world_from_text(
         Ok(imported_world) => {
             let line_count = imported_world.lines.len();
             textures.set(imported_world.textures);
+            wall_data_by_line_id.set(Some(imported_world.wall_data_by_line_id));
             world_json.set(Some(imported_world.source_json));
             lines.set(imported_world.lines);
             next_line_id.set(first_line_id + line_count);
