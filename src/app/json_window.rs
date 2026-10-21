@@ -12,6 +12,7 @@ const INVALID_JSON_STATUS: &str = "Waiting for valid JsonWorld JSON.";
 #[component]
 pub fn JsonWindow(
     lines: RwSignal<Vec<Line>>,
+    textures: RwSignal<Vec<String>>,
     next_line_id: RwSignal<usize>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
@@ -26,6 +27,7 @@ pub fn JsonWindow(
         import_world_from_text(
             event_target_value(&event),
             lines,
+            textures,
             next_line_id,
             selected_line,
             json_text,
@@ -85,6 +87,10 @@ fn synchronize_json_text(
     import_status: RwSignal<String>,
 ) {
     let current_lines = lines.get();
+    for line in &current_lines {
+        let _ = line.endpoints();
+        let _ = line.texture_id();
+    }
     let Some(source_json) = world_json.get_untracked() else {
         return;
     };
@@ -98,6 +104,7 @@ fn synchronize_json_text(
 fn import_world_from_text(
     json_text_value: String,
     lines: RwSignal<Vec<Line>>,
+    textures: RwSignal<Vec<String>>,
     next_line_id: RwSignal<usize>,
     selected_line: RwSignal<Option<usize>>,
     json_text: RwSignal<String>,
@@ -110,6 +117,7 @@ fn import_world_from_text(
     match parse_world_json(&json_text_value, first_line_id) {
         Ok(imported_world) => {
             let line_count = imported_world.lines.len();
+            textures.set(imported_world.textures);
             world_json.set(Some(imported_world.source_json));
             lines.set(imported_world.lines);
             next_line_id.set(first_line_id + line_count);

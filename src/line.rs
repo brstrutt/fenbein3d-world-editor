@@ -7,6 +7,7 @@ pub struct Line {
     pub id: usize,
     start: RwSignal<(f64, f64)>,
     end: RwSignal<(f64, f64)>,
+    texture_id: RwSignal<Option<String>>,
 }
 
 impl Line {
@@ -20,7 +21,25 @@ impl Line {
             id,
             start: RwSignal::new(start),
             end: RwSignal::new(end),
+            texture_id: RwSignal::new(None),
         }
+    }
+
+    pub fn with_texture_id(self, texture_id: Option<String>) -> Self {
+        self.texture_id.set(texture_id);
+        self
+    }
+
+    pub fn texture_id(&self) -> Option<String> {
+        self.texture_id.get()
+    }
+
+    pub fn texture_id_untracked(&self) -> Option<String> {
+        self.texture_id.get_untracked()
+    }
+
+    pub fn set_texture_id(&self, texture_id: Option<String>) {
+        self.texture_id.set(texture_id);
     }
 
     pub fn set_endpoint(&self, is_start: bool, position: (f64, f64)) {
@@ -163,6 +182,7 @@ pub fn WorldLine(
 #[component]
 pub fn LineInspector(
     lines: RwSignal<Vec<Line>>,
+    textures: RwSignal<Vec<String>>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
     let set_coordinate = move |is_start: bool, is_x: bool, value: String| {
@@ -202,6 +222,16 @@ pub fn LineInspector(
             .get()
             .and_then(|id| lines.with(|lines| lines.iter().find(|line| line.id == id).copied()))
     };
+    let set_texture = move |value: String| {
+        let Some(id) = selected_line.get_untracked() else {
+            return;
+        };
+        lines.with_untracked(|lines| {
+            if let Some(line) = lines.iter().find(|line| line.id == id) {
+                line.set_texture_id((!value.is_empty()).then_some(value));
+            }
+        });
+    };
 
     view! {
         <aside class="line-inspector" hidden=move || selected_line.get().is_none()>
@@ -219,6 +249,27 @@ pub fn LineInspector(
                     "Close"
                 </button>
             </header>
+            <section class="endpoint-details">
+                <h3>"Texture"</h3>
+                <select
+                    class="coordinate-input"
+                    aria-label="Wall texture"
+                    prop:value=move || selected().and_then(|line| line.texture_id()).unwrap_or_default()
+                    on:change=move |event| set_texture(event_target_value(&event))
+                >
+                    <option value="">"Unselected"</option>
+                    <For
+                        each=move || textures.get()
+                        key=|texture| texture.clone()
+                        children=move |texture| {
+                            let texture_value = texture.clone();
+                            view! {
+                                <option value=texture_value>{texture}</option>
+                            }
+                        }
+                    />
+                </select>
+            </section>
             <section class="endpoint-details">
                 <h3>"Start"</h3>
                 <dl>

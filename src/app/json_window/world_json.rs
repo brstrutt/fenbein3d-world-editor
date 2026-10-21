@@ -11,6 +11,7 @@ struct JsonWorld {
 struct JsonWall {
     start: JsonPoint,
     end: JsonPoint,
+    texture_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -21,6 +22,7 @@ struct JsonPoint {
 
 pub(super) struct ImportedWorld {
     pub lines: Vec<Line>,
+    pub textures: Vec<String>,
     pub source_json: Value,
 }
 
@@ -30,6 +32,7 @@ pub(super) fn parse_world_json(
 ) -> Result<ImportedWorld, serde_json::Error> {
     let source_json: Value = serde_json::from_str(json_text)?;
     let world: JsonWorld = serde_json::from_value(source_json.clone())?;
+    let textures = collect_texture_ids(&source_json);
     let lines = world
         .walls
         .into_iter()
@@ -40,10 +43,15 @@ pub(super) fn parse_world_json(
                 (wall.start.x, wall.start.y),
                 (wall.end.x, wall.end.y),
             )
+            .with_texture_id(wall.texture_id)
         })
         .collect();
 
-    Ok(ImportedWorld { lines, source_json })
+    Ok(ImportedWorld {
+        lines,
+        textures,
+        source_json,
+    })
 }
 
 pub(super) fn serialize_world_with_lines(
@@ -80,12 +88,42 @@ fn update_wall(index: usize, line: &Line, existing_walls: &[Value]) -> Result<Va
     let wall_object = wall
         .as_object_mut()
         .ok_or_else(|| format!("Wall {index} is not a JSON object."))?;
-    let ((start_x, start_y), (end_x, end_y)) = line.endpoints();
+    let ((start_x, start_y), (end_x, end_y)) = line.endpoints_untracked();
 
     wall_object.insert("start".to_owned(), json!({ "x": start_x, "y": start_y }));
     wall_object.insert("end".to_owned(), json!({ "x": end_x, "y": end_y }));
+    wall_object.insert(
+        "texture_id".to_owned(),
+        json!(line.texture_id_untracked().unwrap_or_default()),
+    );
 
     Ok(wall)
+}
+
+fn collect_texture_ids(world: &Value) -> Vec<String> {
+    let mut texture_ids = Vec::new();
+
+    for field in ["floor_texture_id", "ceiling_texture_id"] {
+        if let Some(texture_id) = world.get(field).and_then(Value::as_str) {
+            add_texture_id(&mut texture_ids, texture_id);
+        }
+    }
+
+    if let Some(walls) = world.get("walls").and_then(Value::as_array) {
+        for wall in walls {
+            if let Some(texture_id) = wall.get("texture_id").and_then(Value::as_str) {
+                add_texture_id(&mut texture_ids, texture_id);
+            }
+        }
+    }
+
+    texture_ids
+}
+
+fn add_texture_id(texture_ids: &mut Vec<String>, texture_id: &str) {
+    if !texture_id.is_empty() && !texture_ids.iter().any(|existing| existing == texture_id) {
+        texture_ids.push(texture_id.to_owned());
+    }
 }
 
 fn wall_template_without_paintings(wall: &Value) -> Value {
@@ -99,6 +137,7 @@ fn wall_template_without_paintings(wall: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{parse_world_json, serialize_world_with_lines};
+    use crate::line::Line;
     use serde_json::Value;
 
     #[test]
@@ -122,6 +161,11 @@ mod tests {
             imported.lines[0].endpoints_untracked(),
             ((-1.25, 2.5), (3.75, -4.0))
         );
+        assert_eq!(
+            imported.lines[0].texture_id_untracked().as_deref(),
+            Some("wall")
+        );
+        assert_eq!(imported.textures, ["floor", "ceiling", "wall"]);
     }
 
     #[test]
@@ -158,7 +202,30 @@ mod tests {
     }
 
     #[test]
-    fn new_walls_inherit_texture_without_copying_paintings() {
+    fn updates_wall_texture_and_keeps_new_lines_unselected() {
+        let json_text = r#"{
+            "walls": [{
+                "start": { "x": 0.0, "y": 1.0 },
+                "end": { "x": 2.0, "y": 3.0 },
+                "texture_id": "stone"
+            }]
+        }"#;
+        let imported = parse_world_json(json_text, 0).unwrap();
+        let new_line = Line::from_endpoints(1, (4.0, 5.0), (6.0, 7.0));
+        assert_eq!(new_line.texture_id_untracked(), None);
+
+        imported.lines[0].set_texture_id(Some("brick".to_owned()));
+        let lines = [imported.lines[0], new_line];
+
+        let updated = serialize_world_with_lines(&imported.source_json, &lines).unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
+        assert_eq!(updated["walls"][0]["texture_id"], "brick");
+        assert_eq!(updated["walls"][1]["texture_id"], "");
+    }
+
+    #[test]
+    fn new_walls_are_unselected_and_do_not_copy_paintings() {
         let json_text = r#"{
             "walls": [{
                 "start": { "x": 0.0, "y": 1.0 },
@@ -175,7 +242,7 @@ mod tests {
         let updated = serialize_world_with_lines(&imported.source_json, &imported.lines).unwrap();
         let updated: Value = serde_json::from_str(&updated).unwrap();
 
-        assert_eq!(updated["walls"][1]["texture_id"], "wall");
+        assert_eq!(updated["walls"][1]["texture_id"], "");
         assert!(updated["walls"][1].get("paintings").is_none());
     }
 }
