@@ -1,0 +1,27 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/rust
+{
+	"name": "Rust",
+	"image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
+	"postCreateCommand": ".devcontainer/postCreateCommand.sh",
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"rust-analyzer.cargo.features": "all", // Enable all features
+				"editor.inlayHints.enabled": "offUnlessPressed",
+				"editor.formatOnSave": true,
+				"editor.semanticTokenColorCustomizations": {
+					"enabled": true,
+					"rules": {
+						"*.mutable": {
+							"underline": false
+						}
+					}
+				}
+			},
+			"extensions": [
+				"fill-labs.dependi"
+			]
+		}
+	}
+}

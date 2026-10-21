@@ -1,0 +1,50 @@
+name: Build and Publish
+on:
+  push: 
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      # Allow running workflow manually
+  workflow_dispatch:
+  
+# Set permissions of the GITHUB_TOKEN to allow deployment to github pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-publish:
+      environment:
+        name: github-pages
+        url: ${{ steps.deployment.outputs.page_url }}
+      runs-on: ubuntu-latest
+      concurrency: ci-${{github.ref}}
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v6
+
+        - name: Rust setup
+          uses: actions-rust-lang/setup-rust-toolchain@v1
+          with:
+            target: wasm32-unknown-unknown
+
+        - name: Trunk setup
+          run: cargo install --locked trunk
+
+        - name: Build
+          run: cd example && trunk build --release --public-url "/wasmfenbein3d/"
+
+        - name: Setup Pages
+          uses: actions/configure-pages@v5
+
+        - name: Upload artifact
+          uses: actions/upload-pages-artifact@v4
+          with:
+            # Upload the public directory
+            path: './example/dist'
+
+        - name: Deploy to GitHub Pages
+          id: deployment
+          uses: actions/deploy-pages@v4
