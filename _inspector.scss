@@ -121,7 +121,21 @@
     fill: #d9975caa;
     stroke: #9e392d;
     stroke-width: 0.025;
-    vector-effect: non-scaling-stroke;
+    cursor: pointer;
+}
+
+.wall-preview-painting:focus {
+    outline: none;
+}
+
+.wall-preview-painting:hover {
+    fill: #e6b27dcc;
+}
+
+.wall-preview-painting.selected {
+    fill: #4eaaa0cc;
+    stroke: #164c49;
+    stroke-width: 0.07;
 }
 
 .wall-preview-axis-labels {

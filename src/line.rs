@@ -321,19 +321,9 @@ pub fn LineInspector(
     let mobile_expanded = RwSignal::new(false);
     let active_painting_key = RwSignal::new(None::<usize>);
 
-    Effect::new({
-        let active_painting_key = active_painting_key;
-        move |_| {
-            let selected_id = selected_line.get();
-            let current_lines = lines.get();
-            let first_painting_key = selected_id.and_then(|id| {
-                current_lines
-                    .iter()
-                    .find(|line| line.id == id)
-                    .and_then(|line| line.paintings_untracked().first().map(Painting::key))
-            });
-            active_painting_key.set(first_painting_key);
-        }
+    Effect::new(move |_| {
+        let _ = selected_line.get();
+        active_painting_key.set(None);
     });
 
     let set_coordinate = move |is_start: bool, is_x: bool, value: String| {
@@ -401,9 +391,6 @@ pub fn LineInspector(
         lines.with_untracked(|lines| {
             if let Some(line) = lines.iter().find(|line| line.id == id) {
                 line.add_painting(texture_id, (0.1, 0.1), None);
-                if let Some(painting) = line.paintings_untracked().last() {
-                    active_painting_key.set(Some(painting.key()));
-                }
             }
         });
     };
@@ -468,7 +455,7 @@ pub fn LineInspector(
                 let mut paintings = line.paintings_untracked();
                 paintings.retain(|painting| painting.key() != key);
                 if active_painting_key.get_untracked() == Some(key) {
-                    active_painting_key.set(paintings.first().map(Painting::key));
+                    active_painting_key.set(None);
                 }
                 line.set_paintings(paintings);
             }
@@ -554,8 +541,8 @@ pub fn LineInspector(
                 </p>
                 <svg
                     class="wall-preview-svg"
-                    role="img"
-                    aria-label="Wall preview showing painting positions"
+                    role="group"
+                    aria-label="Wall preview. Click a painting to select it."
                     viewBox=move || {
                         let width = selected_wall_width();
                         format!("-0.025 -0.025 {} 2.05", width + 0.05)
@@ -581,7 +568,9 @@ pub fn LineInspector(
                                 .unwrap_or_default()
                         }
                         key=|(line_id, painting)| (*line_id, painting.key())
-                        children=move |((line_id, painting_key), _)| {
+                        children=move |((line_id, painting_key), painting)| {
+                            let painting_label =
+                                format!("Select painting {} ({})", painting_key + 1, painting.texture_id());
                             let painting_bounds = move || {
                                 lines.with(|lines| {
                                     lines
@@ -606,6 +595,12 @@ pub fn LineInspector(
                             view! {
                                 <rect
                                     class="wall-preview-painting"
+                                    class:selected=move || {
+                                        active_painting_key.get() == Some(painting_key)
+                                    }
+                                    role="button"
+                                    tabindex="0"
+                                    aria-label=painting_label
                                     x=move || painting_bounds().map_or(0.0, |bounds| bounds.0)
                                     y=move || painting_bounds().map_or(0.0, |bounds| bounds.1)
                                     width=move || {
@@ -615,6 +610,15 @@ pub fn LineInspector(
                                     height=move || {
                                         painting_bounds()
                                             .map_or(0.0, |bounds| (bounds.3 - bounds.1).max(0.0))
+                                    }
+                                    on:click=move |_| {
+                                        active_painting_key.set(Some(painting_key))
+                                    }
+                                    on:keydown=move |event: ev::KeyboardEvent| {
+                                        if event.key() == "Enter" || event.key() == " " {
+                                            event.prevent_default();
+                                            active_painting_key.set(Some(painting_key));
+                                        }
                                     }
                                 />
                             }
@@ -638,8 +642,20 @@ pub fn LineInspector(
                     </button>
                 </header>
                 <Show
-                    when=move || selected().is_some_and(|line| !line.paintings().is_empty())
-                    fallback=|| view! { <p class="empty-paintings">"No paintings yet."</p> }
+                    when=move || {
+                        selected().is_some_and(|line| {
+                            active_painting_key.get().is_some_and(|key| {
+                                line.paintings().iter().any(|painting| painting.key() == key)
+                            })
+                        })
+                    }
+                    fallback=|| {
+                        view! {
+                            <p class="empty-paintings">
+                                "Click a painting in the preview to edit its details."
+                            </p>
+                        }
+                    }
                 >
                     {move || {
                         selected().and_then(|line| {
@@ -663,54 +679,7 @@ pub fn LineInspector(
                             Some(view! {
                                 <div class="painting-editor">
                                     <div class="painting-picker">
-                                        <select
-                                            class="coordinate-input"
-                                            aria-label="Selected painting"
-                                            prop:value=move || {
-                                                active_painting_key
-                                                    .get()
-                                                    .map(|key| key.to_string())
-                                                    .unwrap_or_default()
-                                            }
-                                            on:change=move |event| {
-                                                active_painting_key.set(
-                                                    event_target_value(&event).parse().ok(),
-                                                )
-                                            }
-                                        >
-                                            <For
-                                                each=move || {
-                                                    selected()
-                                                        .map(|line| {
-                                                            line.paintings()
-                                                                .into_iter()
-                                                                .map(|painting| {
-                                                                    ((line.id, painting.key()), painting)
-                                                                })
-                                                                .collect::<Vec<_>>()
-                                                        })
-                                                        .unwrap_or_default()
-                                                }
-                                                key=|((line_id, painting_key), _)| {
-                                                    (*line_id, *painting_key)
-                                                }
-                                                children=move |(_, painting)| {
-                                                    let key = painting.key();
-                                                    let label = format!(
-                                                        "Painting {} — {}",
-                                                        key + 1,
-                                                        if painting.texture_id().is_empty() {
-                                                            "Unselected"
-                                                        } else {
-                                                            painting.texture_id()
-                                                        }
-                                                    );
-                                                    view! {
-                                                        <option value=key.to_string()>{label}</option>
-                                                    }
-                                                }
-                                            />
-                                        </select>
+                                        <span>{format!("Painting {painting_number}")}</span>
                                         <button
                                             class="painting-remove"
                                             type="button"
