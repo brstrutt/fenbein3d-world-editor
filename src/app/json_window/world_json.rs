@@ -496,6 +496,25 @@ mod tests {
     }
 
     #[test]
+    fn painting_without_bottom_right_keeps_implicit_size_in_json() {
+        let line = Line::from_endpoints(0, (0.0, 0.0), (4.0, 0.0)).with_paintings(vec![
+            crate::line::Painting::new(0, "square".to_owned(), (0.5, 0.25), None),
+        ]);
+        let updated =
+            serialize_world_with_lines(&super::empty_world_json(), &HashMap::new(), &[line])
+                .unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
+        assert_eq!(updated["walls"][0]["paintings"][0]["id"], "square");
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["y"], 0.25);
+        assert!(
+            updated["walls"][0]["paintings"][0]
+                .get("bottom_right")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn deleting_last_painting_removes_its_json_array() {
         let json_text = r#"{
             "walls": [{

@@ -373,6 +373,12 @@ pub fn LineInspector(
             .get()
             .and_then(|id| lines.with(|lines| lines.iter().find(|line| line.id == id).copied()))
     };
+    let selected_wall_width = move || {
+        selected()
+            .map(|line| wall_width(line.endpoints()))
+            .unwrap_or(0.01)
+            .max(0.01)
+    };
     let set_texture = move |value: String| {
         let Some(id) = selected_line.get_untracked() else {
             return;
@@ -394,7 +400,7 @@ pub fn LineInspector(
             .unwrap_or_default();
         lines.with_untracked(|lines| {
             if let Some(line) = lines.iter().find(|line| line.id == id) {
-                line.add_painting(texture_id, (0.1, 0.1), Some((0.6, 0.6)));
+                line.add_painting(texture_id, (0.1, 0.1), None);
                 if let Some(painting) = line.paintings_untracked().last() {
                     active_painting_key.set(Some(painting.key()));
                 }
@@ -441,6 +447,16 @@ pub fn LineInspector(
                 y = value;
             }
             painting.set_bottom_right(Some((x, y)));
+        });
+    };
+    let set_painting_custom_bottom_right = move |key: usize, enabled: bool| {
+        update_selected_painting(lines, selected_line, key, |painting| {
+            if enabled {
+                painting
+                    .set_bottom_right(Some(implicit_painting_bottom_right(painting.top_left())));
+            } else {
+                painting.set_bottom_right(None);
+            }
         });
     };
     let remove_painting = move |key: usize| {
@@ -526,6 +542,62 @@ pub fn LineInspector(
                     />
                 </select>
             </section>
+            <section class="endpoint-details wall-painting-preview">
+                <h3>"Wall preview"</h3>
+                <p>
+                    {move || {
+                        format!(
+                            "{:.2} × 2.0 wall units",
+                            selected_wall_width()
+                        )
+                    }}
+                </p>
+                <svg
+                    class="wall-preview-svg"
+                    role="img"
+                    aria-label="Wall preview showing painting positions"
+                    viewBox=move || {
+                        let width = selected_wall_width();
+                        format!("-0.025 -0.025 {} 2.05", width + 0.05)
+                    }
+                    preserveAspectRatio="xMidYMid meet"
+                >
+                    <rect
+                        class="wall-preview-surface"
+                        x="0"
+                        y="0"
+                        width=move || selected_wall_width().to_string()
+                        height="2"
+                    />
+                    <For
+                        each=move || {
+                            selected()
+                                .map(|line| line.paintings())
+                                .unwrap_or_default()
+                        }
+                        key=|painting| painting.key()
+                        children=move |painting| {
+                            let (left, top) = painting.top_left();
+                            let (right, bottom) = painting
+                                .bottom_right()
+                                .unwrap_or_else(|| implicit_painting_bottom_right((left, top)));
+                            view! {
+                                <rect
+                                    class="wall-preview-painting"
+                                    x=left
+                                    y=top
+                                    width=(right - left).max(0.0)
+                                    height=(bottom - top).max(0.0)
+                                />
+                            }
+                        }
+                    />
+                </svg>
+                <div class="wall-preview-axis-labels" aria-hidden="true">
+                    <span>"0, 0 — top left"</span>
+                    <span>"Wall width →"</span>
+                </div>
+            </section>
             <section class="endpoint-details painting-details">
                 <header class="painting-heading">
                     <h3>"Paintings"</h3>
@@ -557,7 +629,9 @@ pub fn LineInspector(
                             let (top_left_x, top_left_y) = painting.top_left();
                             let (bottom_right_x, bottom_right_y) = painting
                                 .bottom_right()
-                                .unwrap_or((top_left_x + 0.5, top_left_y + 0.5));
+                                .unwrap_or_else(|| {
+                                    implicit_painting_bottom_right((top_left_x, top_left_y))
+                                });
                             Some(view! {
                                 <div class="painting-editor">
                                     <div class="painting-picker">
@@ -671,42 +745,66 @@ pub fn LineInspector(
                                             />
                                         </label>
                                     </div>
-                                    <div class="painting-position">
-                                        <label>
-                                            "Right"
-                                            <input
-                                                class="coordinate-input"
-                                                type="number"
-                                                step="any"
-                                                aria-label=format!("Painting {painting_number} right position")
-                                                prop:value=bottom_right_x.to_string()
-                                                on:change=move |event| {
-                                                    set_painting_bottom_right(
-                                                        painting_key,
-                                                        true,
-                                                        event_target_value(&event),
-                                                    )
-                                                }
-                                            />
-                                        </label>
-                                        <label>
-                                            "Bottom"
-                                            <input
-                                                class="coordinate-input"
-                                                type="number"
-                                                step="any"
-                                                aria-label=format!("Painting {painting_number} bottom position")
-                                                prop:value=bottom_right_y.to_string()
-                                                on:change=move |event| {
-                                                    set_painting_bottom_right(
-                                                        painting_key,
-                                                        false,
-                                                        event_target_value(&event),
-                                                    )
-                                                }
-                                            />
-                                        </label>
-                                    </div>
+                                    <label class="painting-custom-size">
+                                        <input
+                                            type="checkbox"
+                                            aria-label=format!("Specify painting {painting_number} bottom-right coordinates")
+                                            prop:checked=painting.bottom_right().is_some()
+                                            on:change=move |event| {
+                                                set_painting_custom_bottom_right(
+                                                    painting_key,
+                                                    event_target_checked(&event),
+                                                )
+                                            }
+                                        />
+                                        "Specify bottom-right coordinates"
+                                    </label>
+                                    <Show when=move || {
+                                        selected()
+                                            .and_then(|line| {
+                                                line.paintings()
+                                                    .into_iter()
+                                                    .find(|item| item.key() == painting_key)
+                                            })
+                                            .is_some_and(|item| item.bottom_right().is_some())
+                                    }>
+                                        <div class="painting-position">
+                                            <label>
+                                                "Right"
+                                                <input
+                                                    class="coordinate-input"
+                                                    type="number"
+                                                    step="any"
+                                                    aria-label=format!("Painting {painting_number} right position")
+                                                    prop:value=bottom_right_x.to_string()
+                                                    on:change=move |event| {
+                                                        set_painting_bottom_right(
+                                                            painting_key,
+                                                            true,
+                                                            event_target_value(&event),
+                                                        )
+                                                    }
+                                                />
+                                            </label>
+                                            <label>
+                                                "Bottom"
+                                                <input
+                                                    class="coordinate-input"
+                                                    type="number"
+                                                    step="any"
+                                                    aria-label=format!("Painting {painting_number} bottom position")
+                                                    prop:value=bottom_right_y.to_string()
+                                                    on:change=move |event| {
+                                                        set_painting_bottom_right(
+                                                            painting_key,
+                                                            false,
+                                                            event_target_value(&event),
+                                                        )
+                                                    }
+                                                />
+                                            </label>
+                                        </div>
+                                    </Show>
                                 </div>
                             })
                         })
@@ -799,10 +897,36 @@ fn update_selected_painting(
     });
 }
 
+fn wall_width(((start_x, start_y), (end_x, end_y)): ((f64, f64), (f64, f64))) -> f64 {
+    (end_x - start_x).hypot(end_y - start_y)
+}
+
+fn implicit_painting_bottom_right((left, top): (f64, f64)) -> (f64, f64) {
+    let bottom = 2.0 - top;
+    (left + bottom - top, bottom)
+}
+
 fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Option<usize>>) {
     let Some(selected_id) = selected_line.get_untracked() else {
         return;
     };
     lines.update(|lines| lines.retain(|line| line.id != selected_id));
     selected_line.set(None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{implicit_painting_bottom_right, wall_width};
+
+    #[test]
+    fn wall_preview_width_matches_line_length() {
+        assert_eq!(wall_width(((0.0, 0.0), (3.0, 4.0))), 5.0);
+        assert_eq!(wall_width(((-1.5, 2.0), (1.5, 2.0))), 3.0);
+    }
+
+    #[test]
+    fn implicit_painting_bottom_right_is_square_and_balanced_on_wall() {
+        assert_eq!(implicit_painting_bottom_right((0.25, 0.5)), (1.25, 1.5));
+        assert_eq!(implicit_painting_bottom_right((2.0, 0.0)), (4.0, 2.0));
+    }
 }

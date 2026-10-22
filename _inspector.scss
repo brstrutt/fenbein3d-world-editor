@@ -88,6 +88,51 @@
     font-size: 0.9rem;
 }
 
+.wall-painting-preview>p {
+    margin: -4px 0 8px;
+    color: #65766e;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.wall-preview-svg {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    height: 150px;
+    padding: 8px;
+    border: 1px solid #c8d0cb;
+    border-radius: 3px;
+    background:
+        linear-gradient(45deg, #20332c08 25%, transparent 25%, transparent 75%, #20332c08 75%),
+        linear-gradient(45deg, #20332c08 25%, transparent 25%, transparent 75%, #20332c08 75%),
+        #fbfcfb;
+    background-position: 0 0, 8px 8px;
+    background-size: 16px 16px;
+}
+
+.wall-preview-surface {
+    fill: #e8ede9;
+    stroke: #52645b;
+    stroke-width: 0.025;
+}
+
+.wall-preview-painting {
+    fill: #d9975caa;
+    stroke: #9e392d;
+    stroke-width: 0.025;
+    vector-effect: non-scaling-stroke;
+}
+
+.wall-preview-axis-labels {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 5px;
+    color: #65766e;
+    font-size: 0.7rem;
+}
+
 .painting-heading,
 .painting-item-heading {
     display: flex;
@@ -148,6 +193,21 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+}
+
+.painting-custom-size {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #52645b;
+    font-size: 0.8rem;
+}
+
+.painting-custom-size input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: #2e6a67;
 }
 
 .empty-paintings {
