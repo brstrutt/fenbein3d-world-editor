@@ -572,22 +572,50 @@ pub fn LineInspector(
                     <For
                         each=move || {
                             selected()
-                                .map(|line| line.paintings())
+                                .map(|line| {
+                                    line.paintings()
+                                        .into_iter()
+                                        .map(|painting| ((line.id, painting.key()), painting))
+                                        .collect::<Vec<_>>()
+                                })
                                 .unwrap_or_default()
                         }
-                        key=|painting| painting.key()
-                        children=move |painting| {
-                            let (left, top) = painting.top_left();
-                            let (right, bottom) = painting
-                                .bottom_right()
-                                .unwrap_or_else(|| implicit_painting_bottom_right((left, top)));
+                        key=|(line_id, painting)| (*line_id, painting.key())
+                        children=move |((line_id, painting_key), _)| {
+                            let painting_bounds = move || {
+                                lines.with(|lines| {
+                                    lines
+                                        .iter()
+                                        .find(|line| line.id == line_id)
+                                        .and_then(|line| {
+                                            line.paintings().into_iter().find(|painting| {
+                                                painting.key() == painting_key
+                                            })
+                                        })
+                                        .map(|painting| {
+                                            let (left, top) = painting.top_left();
+                                            let (right, bottom) = painting
+                                                .bottom_right()
+                                                .unwrap_or_else(|| {
+                                                    implicit_painting_bottom_right((left, top))
+                                                });
+                                            (left, top, right, bottom)
+                                        })
+                                })
+                            };
                             view! {
                                 <rect
                                     class="wall-preview-painting"
-                                    x=left
-                                    y=top
-                                    width=(right - left).max(0.0)
-                                    height=(bottom - top).max(0.0)
+                                    x=move || painting_bounds().map_or(0.0, |bounds| bounds.0)
+                                    y=move || painting_bounds().map_or(0.0, |bounds| bounds.1)
+                                    width=move || {
+                                        painting_bounds()
+                                            .map_or(0.0, |bounds| (bounds.2 - bounds.0).max(0.0))
+                                    }
+                                    height=move || {
+                                        painting_bounds()
+                                            .map_or(0.0, |bounds| (bounds.3 - bounds.1).max(0.0))
+                                    }
                                 />
                             }
                         }
@@ -653,11 +681,20 @@ pub fn LineInspector(
                                             <For
                                                 each=move || {
                                                     selected()
-                                                        .map(|line| line.paintings())
+                                                        .map(|line| {
+                                                            line.paintings()
+                                                                .into_iter()
+                                                                .map(|painting| {
+                                                                    ((line.id, painting.key()), painting)
+                                                                })
+                                                                .collect::<Vec<_>>()
+                                                        })
                                                         .unwrap_or_default()
                                                 }
-                                                key=|painting| painting.key()
-                                                children=move |painting| {
+                                                key=|((line_id, painting_key), _)| {
+                                                    (*line_id, *painting_key)
+                                                }
+                                                children=move |(_, painting)| {
                                                     let key = painting.key();
                                                     let label = format!(
                                                         "Painting {} — {}",

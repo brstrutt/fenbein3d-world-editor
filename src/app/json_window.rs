@@ -248,6 +248,7 @@ fn import_world_from_text(
 mod tests {
     use super::synchronize_json_text;
     use crate::app::json_window::world_json::empty_world_json;
+    use crate::line::Line;
     use leptos::prelude::*;
     use serde_json::Value;
     use std::collections::HashMap;
@@ -271,5 +272,34 @@ mod tests {
         let updated: Value = serde_json::from_str(&json_text.get_untracked()).unwrap();
         assert_eq!(updated["floor_texture_id"], "stone-floor");
         assert_eq!(updated["ceiling_texture_id"], "plaster-ceiling");
+    }
+
+    #[test]
+    fn painting_coordinate_changes_are_written_to_json() {
+        let line = Line::from_endpoints(0, (0.0, 0.0), (3.0, 0.0));
+        line.add_painting("art".to_owned(), (0.1, 0.1), None);
+        let mut paintings = line.paintings_untracked();
+        paintings[0].set_top_left((0.75, 0.4));
+        line.set_paintings(paintings);
+        let json_text = RwSignal::new(String::new());
+
+        synchronize_json_text(
+            RwSignal::new(vec![line]),
+            RwSignal::new(String::new()),
+            RwSignal::new(String::new()),
+            RwSignal::new(Some(empty_world_json())),
+            RwSignal::new(Some(HashMap::new())),
+            json_text,
+            RwSignal::new(String::new()),
+        );
+
+        let updated: Value = serde_json::from_str(&json_text.get_untracked()).unwrap();
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["x"], 0.75);
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["y"], 0.4);
+        assert!(
+            updated["walls"][0]["paintings"][0]
+                .get("bottom_right")
+                .is_none()
+        );
     }
 }
