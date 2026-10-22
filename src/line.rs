@@ -189,6 +189,7 @@ pub fn LineInspector(
     textures: RwSignal<Vec<String>>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
+    let mobile_expanded = RwSignal::new(false);
     let set_coordinate = move |is_start: bool, is_x: bool, value: String| {
         let (Some(id), Ok(value)) = (selected_line.get_untracked(), value.parse::<f64>()) else {
             return;
@@ -239,12 +240,33 @@ pub fn LineInspector(
     let delete_selected = move |_| delete_selected_line(lines, selected_line);
 
     view! {
-        <aside class="line-inspector" hidden=move || selected_line.get().is_none()>
+        <aside
+            class="line-inspector"
+            class:mobile-collapsed=move || !mobile_expanded.get()
+            hidden=move || selected_line.get().is_none()
+        >
             <header class="inspector-heading">
                 <div>
                     <p>"Selected line"</p>
                     <h2>{move || selected().map_or_else(|| "Line".to_owned(), |line| format!("Line {}", line.id + 1))}</h2>
                 </div>
+                <button
+                    class="inspector-expand"
+                    type="button"
+                    aria-label=move || {
+                        if mobile_expanded.get() {
+                            "Collapse line details"
+                        } else {
+                            "Expand line details"
+                        }
+                    }
+                    aria-expanded=move || mobile_expanded.get().to_string()
+                    on:click=move |_| {
+                        mobile_expanded.update(|expanded| *expanded = !*expanded)
+                    }
+                >
+                    {move || if mobile_expanded.get() { "Done" } else { "Edit" }}
+                </button>
                 <button
                     class="inspector-delete"
                     type="button"

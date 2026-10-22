@@ -1,5 +1,6 @@
 mod world_json;
 
+use super::texture_window::TextureWindow;
 use crate::line::Line;
 use leptos::prelude::*;
 use serde_json::Value;
@@ -19,7 +20,7 @@ pub fn JsonWindow(
     next_line_id: RwSignal<usize>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
-    let minimized = RwSignal::new(false);
+    let minimized = RwSignal::new(true);
     let import_status = RwSignal::new(INITIAL_IMPORT_STATUS.to_owned());
     let json_text = RwSignal::new(String::new());
     let world_json = RwSignal::new(None::<Value>);
@@ -54,90 +55,102 @@ pub fn JsonWindow(
     };
 
     view! {
-        <aside class="json-window" aria-labelledby="json-window-title">
-            <header class="json-window-heading">
+        <aside class="world-panel" aria-labelledby="world-panel-title">
+            <header class="world-panel-heading">
                 <div>
-                    <p>"Line data"</p>
-                    <h2 id="json-window-title">"JSON"</h2>
+                    <p>"Scene settings"</p>
+                    <h2 id="world-panel-title">"World"</h2>
                 </div>
                 <button
-                    class="json-window-toggle"
+                    class="world-panel-toggle"
                     type="button"
                     aria-label=move || {
                         if minimized.get() {
-                            "Expand JSON window"
+                            "Show world settings"
                         } else {
-                            "Minimize JSON window"
+                            "Hide world settings"
                         }
                     }
                     title=move || {
                         if minimized.get() {
-                            "Expand JSON window"
+                            "Show world settings"
                         } else {
-                            "Minimize JSON window"
+                            "Hide world settings"
                         }
                     }
                     aria-expanded=move || (!minimized.get()).to_string()
                     on:click=move |_| minimized.update(|minimized| *minimized = !*minimized)
                 >
-                    {move || if minimized.get() { "+" } else { "-" }}
+                    {move || if minimized.get() { "Edit" } else { "−" }}
                 </button>
             </header>
-            <section class="world-texture-controls" hidden=move || minimized.get()>
-                <h3>"World textures"</h3>
-                <label>
-                    "Ceiling"
-                    <select
-                        class="world-texture-select"
-                        aria-label="Ceiling texture"
-                        prop:value=move || ceiling_texture_id.get()
-                        on:change=move |event| ceiling_texture_id.set(event_target_value(&event))
-                    >
-                        <option value="">"Unselected"</option>
-                        <For
-                            each=move || textures.get()
-                            key=|texture| texture.clone()
-                            children=move |texture| {
-                                let texture_value = texture.clone();
-                                view! {
-                                    <option value=texture_value>{texture}</option>
+            <div class="world-panel-content" hidden=move || minimized.get()>
+                <section class="world-texture-controls" aria-labelledby="world-texture-title">
+                    <h3 id="world-texture-title">"World textures"</h3>
+                    <label>
+                        "Ceiling"
+                        <select
+                            class="world-texture-select"
+                            aria-label="Ceiling texture"
+                            prop:value=move || ceiling_texture_id.get()
+                            on:change=move |event| ceiling_texture_id.set(event_target_value(&event))
+                        >
+                            <option value="">"Unselected"</option>
+                            <For
+                                each=move || textures.get()
+                                key=|texture| texture.clone()
+                                children=move |texture| {
+                                    let texture_value = texture.clone();
+                                    view! {
+                                        <option value=texture_value>{texture}</option>
+                                    }
                                 }
-                            }
-                        />
-                    </select>
-                </label>
-                <label>
-                    "Floor"
-                    <select
-                        class="world-texture-select"
-                        aria-label="Floor texture"
-                        prop:value=move || floor_texture_id.get()
-                        on:change=move |event| floor_texture_id.set(event_target_value(&event))
-                    >
-                        <option value="">"Unselected"</option>
-                        <For
-                            each=move || textures.get()
-                            key=|texture| texture.clone()
-                            children=move |texture| {
-                                let texture_value = texture.clone();
-                                view! {
-                                    <option value=texture_value>{texture}</option>
+                            />
+                        </select>
+                    </label>
+                    <label>
+                        "Floor"
+                        <select
+                            class="world-texture-select"
+                            aria-label="Floor texture"
+                            prop:value=move || floor_texture_id.get()
+                            on:change=move |event| floor_texture_id.set(event_target_value(&event))
+                        >
+                            <option value="">"Unselected"</option>
+                            <For
+                                each=move || textures.get()
+                                key=|texture| texture.clone()
+                                children=move |texture| {
+                                    let texture_value = texture.clone();
+                                    view! {
+                                        <option value=texture_value>{texture}</option>
+                                    }
                                 }
-                            }
-                        />
-                    </select>
-                </label>
-            </section>
-            <textarea
-                class="json-textarea"
-                aria-label="Line positions JSON"
-                placeholder="Paste a JSON object here..."
-                spellcheck="false"
-                hidden=move || minimized.get()
-                prop:value=move || json_text.get()
-                on:input=import_json
-            />
-            <p class="json-import-status" role="status">{move || import_status.get()}</p>
+                            />
+                        </select>
+                    </label>
+                </section>
+                <TextureWindow
+                    textures=textures
+                    lines=lines
+                    floor_texture_id=floor_texture_id
+                    ceiling_texture_id=ceiling_texture_id
+                />
+                <details class="world-json-editor">
+                    <summary>"Import / Export JSON"</summary>
+                    <textarea
+                        class="json-textarea"
+                        aria-label="World JSON"
+                        placeholder="Paste a JSON object here..."
+                        spellcheck="false"
+                        prop:value=move || json_text.get()
+                        on:input=import_json
+                    />
+                    <p class="json-import-status" role="status">
+                        {move || import_status.get()}
+                    </p>
+                </details>
+            </div>
         </aside>
     }
 }

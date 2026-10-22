@@ -36,12 +36,6 @@ pub fn App() -> impl IntoView {
                 next_line_id=next_line_id
                 selected_line=selected_line
             />
-            <texture_window::TextureWindow
-                textures=textures
-                lines=lines
-                floor_texture_id=floor_texture_id
-                ceiling_texture_id=ceiling_texture_id
-            />
         </main>
     }
 }

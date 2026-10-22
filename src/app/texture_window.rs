@@ -8,40 +8,12 @@ pub fn TextureWindow(
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
 ) -> impl IntoView {
-    let minimized = RwSignal::new(false);
     let texture_draft = RwSignal::new(String::new());
 
     view! {
-        <aside class="texture-window" aria-labelledby="texture-window-title">
-            <header class="texture-window-heading">
-                <div>
-                    <p>"Available identifiers"</p>
-                    <h2 id="texture-window-title">"Textures"</h2>
-                </div>
-                <button
-                    class="texture-window-toggle"
-                    type="button"
-                    aria-label=move || {
-                        if minimized.get() {
-                            "Expand textures window"
-                        } else {
-                            "Minimize textures window"
-                        }
-                    }
-                    title=move || {
-                        if minimized.get() {
-                            "Expand textures window"
-                        } else {
-                            "Minimize textures window"
-                        }
-                    }
-                    aria-expanded=move || (!minimized.get()).to_string()
-                    on:click=move |_| minimized.update(|minimized| *minimized = !*minimized)
-                >
-                    {move || if minimized.get() { "+" } else { "-" }}
-                </button>
-            </header>
-            <section class="texture-library" hidden=move || minimized.get()>
+        <details class="texture-library-panel">
+            <summary>"Manage textures"</summary>
+            <section class="texture-library">
                 <form on:submit=move |event: ev::SubmitEvent| {
                     event.prevent_default();
                     add_texture_id(textures, texture_draft);
@@ -86,7 +58,7 @@ pub fn TextureWindow(
                     />
                 </ul>
             </section>
-        </aside>
+        </details>
     }
 }
 

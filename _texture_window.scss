@@ -1,60 +1,13 @@
-.texture-window {
-    position: absolute;
-    z-index: 3;
-    right: 24px;
-    bottom: 24px;
-    box-sizing: border-box;
-    display: flex;
-    width: min(300px, calc(100vw - 48px));
-    max-height: min(320px, calc(100vh - 108px));
-    flex-direction: column;
-    gap: 12px;
-    padding: 18px;
-    border: 1px solid #c8d0cb;
-    border-radius: 4px;
-    background: #fff;
-    box-shadow: 0 4px 18px #20332c1c;
+.texture-library-panel {
+    display: grid;
+    gap: 10px;
 }
 
-.texture-window-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.texture-window-heading p {
-    margin: 0 0 4px;
-    color: #65766e;
-    font-size: 0.8rem;
-}
-
-.texture-window-heading h2 {
-    margin: 0;
-    font-size: 1.125rem;
-}
-
-.texture-window-toggle {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid #c8d0cb;
-    border-radius: 3px;
-    background: #fff;
+.texture-library-panel summary {
     color: #20332c;
-    font: inherit;
-    font-size: 1.125rem;
-    line-height: 1;
+    font-size: 0.9rem;
+    font-weight: 600;
     cursor: pointer;
-}
-
-.texture-window-toggle:hover {
-    background: #e4e9e5;
-}
-
-.texture-window-toggle:focus-visible {
-    outline: 2px solid #2e6a67;
-    outline-offset: 2px;
 }
 
 .texture-library {
@@ -70,6 +23,7 @@
 .texture-id-input {
     box-sizing: border-box;
     min-width: 0;
+    min-height: 36px;
     flex: 1;
     padding: 6px 8px;
     border: 1px solid #c8d0cb;
@@ -82,6 +36,7 @@
 
 .texture-add-button,
 .texture-list button {
+    min-height: 36px;
     padding: 5px 8px;
     border: 1px solid #c8d0cb;
     border-radius: 3px;
@@ -110,16 +65,4 @@
     color: #52645b;
     font-size: 0.8rem;
     overflow-wrap: anywhere;
-}
-
-@media (max-width: 560px) {
-    .texture-window {
-        top: 84px;
-        right: 12px;
-        bottom: auto;
-        left: 12px;
-        width: auto;
-        max-height: 32vh;
-        overflow-y: auto;
-    }
 }

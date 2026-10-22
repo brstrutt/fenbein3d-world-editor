@@ -66,3 +66,40 @@
     font-size: 0.875rem;
     text-align: center;
 }
+
+@media (max-width: 560px) {
+    .workspace-heading {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+        gap: 8px;
+    }
+
+    .workspace-heading h1 {
+        font-size: 1rem;
+    }
+
+    .workspace-actions {
+        gap: 6px;
+    }
+
+    .add-action {
+        padding: 7px 9px;
+        font-size: 0.85rem;
+    }
+
+    .zoom-controls {
+        gap: 2px;
+        margin-left: 0;
+    }
+
+    .zoom-button {
+        width: 34px;
+        height: 36px;
+    }
+
+    .zoom-level {
+        min-width: 38px;
+        font-size: 0.8rem;
+    }
+}
