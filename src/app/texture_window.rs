@@ -2,7 +2,12 @@ use crate::line::Line;
 use leptos::{ev, prelude::*};
 
 #[component]
-pub fn TextureWindow(textures: RwSignal<Vec<String>>, lines: RwSignal<Vec<Line>>) -> impl IntoView {
+pub fn TextureWindow(
+    textures: RwSignal<Vec<String>>,
+    lines: RwSignal<Vec<Line>>,
+    floor_texture_id: RwSignal<String>,
+    ceiling_texture_id: RwSignal<String>,
+) -> impl IntoView {
     let minimized = RwSignal::new(false);
     let texture_draft = RwSignal::new(String::new());
 
@@ -63,7 +68,15 @@ pub fn TextureWindow(textures: RwSignal<Vec<String>>, lines: RwSignal<Vec<Line>>
                                     <button
                                         type="button"
                                         aria-label=format!("Remove texture {texture_id}")
-                                        on:click=move |_| remove_texture_id(textures, lines, &texture_id)
+                                        on:click=move |_| {
+                                            remove_texture_id(
+                                                textures,
+                                                lines,
+                                                floor_texture_id,
+                                                ceiling_texture_id,
+                                                &texture_id,
+                                            )
+                                        }
                                     >
                                         "Remove"
                                     </button>
@@ -94,9 +107,17 @@ fn add_texture_id(textures: RwSignal<Vec<String>>, texture_draft: RwSignal<Strin
 fn remove_texture_id(
     textures: RwSignal<Vec<String>>,
     lines: RwSignal<Vec<Line>>,
+    floor_texture_id: RwSignal<String>,
+    ceiling_texture_id: RwSignal<String>,
     texture_id: &str,
 ) {
     textures.update(|textures| textures.retain(|existing| existing != texture_id));
+    if floor_texture_id.get_untracked() == texture_id {
+        floor_texture_id.set(String::new());
+    }
+    if ceiling_texture_id.get_untracked() == texture_id {
+        ceiling_texture_id.set(String::new());
+    }
     lines.with_untracked(|lines| {
         for line in lines {
             if line.texture_id_untracked().as_deref() == Some(texture_id) {

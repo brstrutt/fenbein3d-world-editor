@@ -11,6 +11,8 @@ use leptos::prelude::*;
 pub fn App() -> impl IntoView {
     let lines = RwSignal::new(Vec::<Line>::new());
     let textures = RwSignal::new(Vec::<String>::new());
+    let floor_texture_id = RwSignal::new(String::new());
+    let ceiling_texture_id = RwSignal::new(String::new());
     let next_line_id = RwSignal::new(0usize);
     let selected_line = RwSignal::new(None::<usize>);
     let zoom = RwSignal::new(1.0_f64);
@@ -29,10 +31,17 @@ pub fn App() -> impl IntoView {
             <json_window::JsonWindow
                 lines=lines
                 textures=textures
+                floor_texture_id=floor_texture_id
+                ceiling_texture_id=ceiling_texture_id
                 next_line_id=next_line_id
                 selected_line=selected_line
             />
-            <texture_window::TextureWindow textures=textures lines=lines />
+            <texture_window::TextureWindow
+                textures=textures
+                lines=lines
+                floor_texture_id=floor_texture_id
+                ceiling_texture_id=ceiling_texture_id
+            />
         </main>
     }
 }

@@ -14,6 +14,8 @@ const INVALID_JSON_STATUS: &str = "Waiting for valid JsonWorld JSON.";
 pub fn JsonWindow(
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
+    floor_texture_id: RwSignal<String>,
+    ceiling_texture_id: RwSignal<String>,
     next_line_id: RwSignal<usize>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
@@ -26,6 +28,8 @@ pub fn JsonWindow(
     Effect::new(move |_| {
         synchronize_json_text(
             lines,
+            floor_texture_id,
+            ceiling_texture_id,
             world_json,
             wall_data_by_line_id,
             json_text,
@@ -38,6 +42,8 @@ pub fn JsonWindow(
             event_target_value(&event),
             lines,
             textures,
+            floor_texture_id,
+            ceiling_texture_id,
             wall_data_by_line_id,
             next_line_id,
             selected_line,
@@ -77,6 +83,51 @@ pub fn JsonWindow(
                     {move || if minimized.get() { "+" } else { "-" }}
                 </button>
             </header>
+            <section class="world-texture-controls" hidden=move || minimized.get()>
+                <h3>"World textures"</h3>
+                <label>
+                    "Ceiling"
+                    <select
+                        class="world-texture-select"
+                        aria-label="Ceiling texture"
+                        prop:value=move || ceiling_texture_id.get()
+                        on:change=move |event| ceiling_texture_id.set(event_target_value(&event))
+                    >
+                        <option value="">"Unselected"</option>
+                        <For
+                            each=move || textures.get()
+                            key=|texture| texture.clone()
+                            children=move |texture| {
+                                let texture_value = texture.clone();
+                                view! {
+                                    <option value=texture_value>{texture}</option>
+                                }
+                            }
+                        />
+                    </select>
+                </label>
+                <label>
+                    "Floor"
+                    <select
+                        class="world-texture-select"
+                        aria-label="Floor texture"
+                        prop:value=move || floor_texture_id.get()
+                        on:change=move |event| floor_texture_id.set(event_target_value(&event))
+                    >
+                        <option value="">"Unselected"</option>
+                        <For
+                            each=move || textures.get()
+                            key=|texture| texture.clone()
+                            children=move |texture| {
+                                let texture_value = texture.clone();
+                                view! {
+                                    <option value=texture_value>{texture}</option>
+                                }
+                            }
+                        />
+                    </select>
+                </label>
+            </section>
             <textarea
                 class="json-textarea"
                 aria-label="Line positions JSON"
@@ -93,6 +144,8 @@ pub fn JsonWindow(
 
 fn synchronize_json_text(
     lines: RwSignal<Vec<Line>>,
+    floor_texture_id: RwSignal<String>,
+    ceiling_texture_id: RwSignal<String>,
     world_json: RwSignal<Option<Value>>,
     wall_data_by_line_id: RwSignal<Option<HashMap<usize, Value>>>,
     json_text: RwSignal<String>,
@@ -103,7 +156,7 @@ fn synchronize_json_text(
         let _ = line.endpoints();
         let _ = line.texture_id();
     }
-    let source_json = match world_json.get_untracked() {
+    let mut source_json = match world_json.get_untracked() {
         Some(source_json) => source_json,
         None if current_lines.is_empty() => return,
         None => {
@@ -116,6 +169,8 @@ fn synchronize_json_text(
     let Some(wall_data_by_line_id) = wall_data_by_line_id.get_untracked() else {
         return;
     };
+    source_json["floor_texture_id"] = serde_json::json!(floor_texture_id.get());
+    source_json["ceiling_texture_id"] = serde_json::json!(ceiling_texture_id.get());
 
     match serialize_world_with_lines(&source_json, &wall_data_by_line_id, &current_lines) {
         Ok(updated_json) => json_text.set(updated_json),
@@ -127,6 +182,8 @@ fn import_world_from_text(
     json_text_value: String,
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
+    floor_texture_id: RwSignal<String>,
+    ceiling_texture_id: RwSignal<String>,
     wall_data_by_line_id: RwSignal<Option<HashMap<usize, Value>>>,
     next_line_id: RwSignal<usize>,
     selected_line: RwSignal<Option<usize>>,
@@ -141,6 +198,22 @@ fn import_world_from_text(
         Ok(imported_world) => {
             let line_count = imported_world.lines.len();
             textures.set(imported_world.textures);
+            floor_texture_id.set(
+                imported_world
+                    .source_json
+                    .get("floor_texture_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
+            ceiling_texture_id.set(
+                imported_world
+                    .source_json
+                    .get("ceiling_texture_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
             wall_data_by_line_id.set(Some(imported_world.wall_data_by_line_id));
             world_json.set(Some(imported_world.source_json));
             lines.set(imported_world.lines);
@@ -149,5 +222,35 @@ fn import_world_from_text(
             import_status.set(format!("Imported {line_count} walls."));
         }
         Err(_) => import_status.set(INVALID_JSON_STATUS.to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::synchronize_json_text;
+    use crate::app::json_window::world_json::empty_world_json;
+    use leptos::prelude::*;
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    #[test]
+    fn selected_world_textures_are_written_to_json() {
+        let floor_texture_id = RwSignal::new("stone-floor".to_owned());
+        let ceiling_texture_id = RwSignal::new("plaster-ceiling".to_owned());
+        let json_text = RwSignal::new(String::new());
+
+        synchronize_json_text(
+            RwSignal::new(Vec::new()),
+            floor_texture_id,
+            ceiling_texture_id,
+            RwSignal::new(Some(empty_world_json())),
+            RwSignal::new(Some(HashMap::new())),
+            json_text,
+            RwSignal::new(String::new()),
+        );
+
+        let updated: Value = serde_json::from_str(&json_text.get_untracked()).unwrap();
+        assert_eq!(updated["floor_texture_id"], "stone-floor");
+        assert_eq!(updated["ceiling_texture_id"], "plaster-ceiling");
     }
 }

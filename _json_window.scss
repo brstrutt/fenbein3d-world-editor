@@ -57,6 +57,40 @@
     outline-offset: 2px;
 }
 
+.world-texture-controls {
+    display: grid;
+    gap: 10px;
+}
+
+.world-texture-controls h3 {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.world-texture-controls label {
+    display: grid;
+    gap: 4px;
+    color: #52645b;
+    font-size: 0.85rem;
+}
+
+.world-texture-select {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 5px 7px;
+    border: 1px solid #c8d0cb;
+    border-radius: 3px;
+    background: #fbfcfb;
+    color: #20332c;
+    font: inherit;
+    font-size: 0.875rem;
+}
+
+.world-texture-select:focus {
+    border-color: #2e6a67;
+    outline: 2px solid #2e6a6733;
+}
+
 .json-textarea {
     box-sizing: border-box;
     width: 100%;
