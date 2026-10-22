@@ -679,7 +679,6 @@ pub fn LineInspector(
                             Some(view! {
                                 <div class="painting-editor">
                                     <div class="painting-picker">
-                                        <span>{format!("Painting {painting_number}")}</span>
                                         <button
                                             class="painting-remove"
                                             type="button"
