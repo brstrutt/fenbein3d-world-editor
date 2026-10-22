@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use self::world_json::{parse_world_json, serialize_world_with_lines};
+use self::world_json::{empty_world_json, parse_world_json, serialize_world_with_lines};
 
 const INITIAL_IMPORT_STATUS: &str = "Paste a JsonWorld object to import its walls.";
 const INVALID_JSON_STATUS: &str = "Waiting for valid JsonWorld JSON.";
@@ -103,8 +103,15 @@ fn synchronize_json_text(
         let _ = line.endpoints();
         let _ = line.texture_id();
     }
-    let Some(source_json) = world_json.get_untracked() else {
-        return;
+    let source_json = match world_json.get_untracked() {
+        Some(source_json) => source_json,
+        None if current_lines.is_empty() => return,
+        None => {
+            let source_json = empty_world_json();
+            world_json.set(Some(source_json.clone()));
+            wall_data_by_line_id.set(Some(HashMap::new()));
+            source_json
+        }
     };
     let Some(wall_data_by_line_id) = wall_data_by_line_id.get_untracked() else {
         return;

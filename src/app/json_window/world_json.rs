@@ -28,6 +28,14 @@ pub(super) struct ImportedWorld {
     pub source_json: Value,
 }
 
+pub(super) fn empty_world_json() -> Value {
+    json!({
+        "floor_texture_id": "",
+        "ceiling_texture_id": "",
+        "walls": []
+    })
+}
+
 pub(super) fn parse_world_json(
     json_text: &str,
     first_line_id: usize,
@@ -175,6 +183,30 @@ mod tests {
     #[test]
     fn rejects_invalid_world_json() {
         assert!(parse_world_json(r#"{"walls":[{}]}"#, 0).is_err());
+    }
+
+    #[test]
+    fn first_line_serializes_as_a_complete_world_json() {
+        let line = Line::from_endpoints(0, (-1.5, 1.0), (1.5, 1.0));
+        let updated =
+            serialize_world_with_lines(&super::empty_world_json(), &HashMap::new(), &[line])
+                .unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
+        assert_eq!(updated["floor_texture_id"], "");
+        assert_eq!(updated["ceiling_texture_id"], "");
+        assert_eq!(updated["walls"][0]["start"]["x"], -1.5);
+        assert_eq!(updated["walls"][0]["start"]["y"], 1.0);
+        assert_eq!(updated["walls"][0]["end"]["x"], 1.5);
+        assert_eq!(updated["walls"][0]["end"]["y"], 1.0);
+        assert_eq!(updated["walls"][0]["texture_id"], "");
+        assert!(
+            serde_json::from_str::<wasmfenbein3d::state::world::load_from_json::JsonWorld>(
+                &updated.to_string()
+            )
+            .is_ok()
+        );
+        assert!(parse_world_json(&updated.to_string(), 1).is_ok());
     }
 
     #[test]
