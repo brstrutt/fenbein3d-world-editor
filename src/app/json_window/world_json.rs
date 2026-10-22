@@ -1,4 +1,4 @@
-use crate::line::Line;
+use crate::line::{Line, Painting};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -13,6 +13,14 @@ struct JsonWall {
     start: JsonPoint,
     end: JsonPoint,
     texture_id: Option<String>,
+    paintings: Option<Vec<JsonPainting>>,
+}
+
+#[derive(Deserialize)]
+struct JsonPainting {
+    id: String,
+    top_left: JsonPoint,
+    bottom_right: Option<JsonPoint>,
 }
 
 #[derive(Deserialize)]
@@ -24,6 +32,7 @@ struct JsonPoint {
 pub(super) struct ImportedWorld {
     pub lines: Vec<Line>,
     pub textures: Vec<String>,
+    pub painting_textures: Vec<String>,
     pub wall_data_by_line_id: HashMap<usize, Value>,
     pub source_json: Value,
 }
@@ -43,6 +52,12 @@ pub(super) fn parse_world_json(
     let source_json: Value = serde_json::from_str(json_text)?;
     let world: JsonWorld = serde_json::from_value(source_json.clone())?;
     let textures = collect_texture_ids(&source_json);
+    let painting_textures = collect_painting_texture_ids(&source_json);
+    let wall_source_data = source_json
+        .get("walls")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let wall_data_by_line_id = source_json
         .get("walls")
         .and_then(Value::as_array)
@@ -56,18 +71,42 @@ pub(super) fn parse_world_json(
         .into_iter()
         .enumerate()
         .map(|(index, wall)| {
+            let painting_source_data = wall_source_data
+                .get(index)
+                .and_then(|wall| wall.get("paintings"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let paintings = wall
+                .paintings
+                .unwrap_or_default()
+                .into_iter()
+                .zip(painting_source_data)
+                .enumerate()
+                .map(|(painting_index, (painting, source_data))| {
+                    Painting::from_json(
+                        painting_index,
+                        painting.id,
+                        (painting.top_left.x, painting.top_left.y),
+                        painting.bottom_right.map(|point| (point.x, point.y)),
+                        source_data,
+                    )
+                })
+                .collect();
             Line::from_endpoints(
                 first_line_id + index,
                 (wall.start.x, wall.start.y),
                 (wall.end.x, wall.end.y),
             )
             .with_texture_id(wall.texture_id)
+            .with_paintings(paintings)
         })
         .collect();
 
     Ok(ImportedWorld {
         lines,
         textures,
+        painting_textures,
         wall_data_by_line_id,
         source_json,
     })
@@ -115,6 +154,20 @@ fn update_wall(line: &Line, wall_data: Option<&Value>) -> Result<Value, String> 
         "texture_id".to_owned(),
         json!(line.texture_id_untracked().unwrap_or_default()),
     );
+    let paintings = line
+        .paintings_untracked()
+        .iter()
+        .map(Painting::to_json)
+        .collect::<Vec<_>>();
+    if !paintings.is_empty() {
+        wall_object.insert("paintings".to_owned(), Value::Array(paintings));
+    } else if wall_object
+        .get("paintings")
+        .and_then(Value::as_array)
+        .is_some_and(|paintings| !paintings.is_empty())
+    {
+        wall_object.remove("paintings");
+    }
 
     Ok(wall)
 }
@@ -136,6 +189,22 @@ fn collect_texture_ids(world: &Value) -> Vec<String> {
         }
     }
 
+    texture_ids
+}
+
+fn collect_painting_texture_ids(world: &Value) -> Vec<String> {
+    let mut texture_ids = Vec::new();
+    if let Some(walls) = world.get("walls").and_then(Value::as_array) {
+        for wall in walls {
+            if let Some(paintings) = wall.get("paintings").and_then(Value::as_array) {
+                for painting in paintings {
+                    if let Some(texture_id) = painting.get("id").and_then(Value::as_str) {
+                        add_texture_id(&mut texture_ids, texture_id);
+                    }
+                }
+            }
+        }
+    }
     texture_ids
 }
 
@@ -161,7 +230,12 @@ mod tests {
                 "start": { "x": -1.25, "y": 2.5 },
                 "end": { "x": 3.75, "y": -4.0 },
                 "texture_id": "wall",
-                "paintings": [{ "id": "art", "top_left": { "x": 0.2, "y": 0.3 } }]
+                "paintings": [{
+                    "id": "art",
+                    "top_left": { "x": 0.2, "y": 0.3 },
+                    "bottom_right": { "x": 0.7, "y": 0.8 },
+                    "custom": "preserved"
+                }]
             }]
         }"#;
 
@@ -178,6 +252,8 @@ mod tests {
             Some("wall")
         );
         assert_eq!(imported.textures, ["floor", "ceiling", "wall"]);
+        assert_eq!(imported.painting_textures, ["art"]);
+        assert_eq!(imported.lines[0].paintings()[0].top_left(), (0.2, 0.3));
     }
 
     #[test]
@@ -218,11 +294,20 @@ mod tests {
                 "start": { "x": 0.0, "y": 1.0 },
                 "end": { "x": 2.0, "y": 3.0 },
                 "texture_id": "wall",
-                "paintings": [{ "id": "art" }]
+                "paintings": [{
+                    "id": "art",
+                    "top_left": { "x": 0.2, "y": 0.3 },
+                    "bottom_right": { "x": 0.7, "y": 0.8 },
+                    "custom": "preserved"
+                }]
             }]
         }"#;
         let imported = parse_world_json(json_text, 0).unwrap();
         imported.lines[0].set_endpoints((-4.5, 2.25), (6.0, -7.75));
+        let mut paintings = imported.lines[0].paintings_untracked();
+        paintings[0].set_texture_id("updated-art".to_owned());
+        paintings[0].set_top_left((0.3, 0.4));
+        imported.lines[0].set_paintings(paintings);
 
         let updated = serialize_world_with_lines(
             &imported.source_json,
@@ -235,7 +320,14 @@ mod tests {
         assert_eq!(updated["floor_texture_id"], "floor");
         assert_eq!(updated["ceiling_texture_id"], "ceiling");
         assert_eq!(updated["walls"][0]["texture_id"], "wall");
-        assert_eq!(updated["walls"][0]["paintings"][0]["id"], "art");
+        assert_eq!(updated["walls"][0]["paintings"][0]["id"], "updated-art");
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["x"], 0.3);
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["y"], 0.4);
+        assert_eq!(
+            updated["walls"][0]["paintings"][0]["bottom_right"]["x"],
+            0.7
+        );
+        assert_eq!(updated["walls"][0]["paintings"][0]["custom"], "preserved");
         assert_eq!(updated["walls"][0]["start"]["x"], -4.5);
         assert_eq!(updated["walls"][0]["start"]["y"], 2.25);
         assert_eq!(updated["walls"][0]["end"]["x"], 6.0);
@@ -277,7 +369,10 @@ mod tests {
                 "start": { "x": 0.0, "y": 1.0 },
                 "end": { "x": 2.0, "y": 3.0 },
                 "texture_id": "wall",
-                "paintings": [{ "id": "art" }]
+                "paintings": [{
+                    "id": "art",
+                    "top_left": { "x": 0.2, "y": 0.3 }
+                }]
             }]
         }"#;
         let mut imported = parse_world_json(json_text, 0).unwrap();
@@ -305,27 +400,33 @@ mod tests {
                     "start": { "x": 0.0, "y": 0.0 },
                     "end": { "x": 1.0, "y": 0.0 },
                     "texture_id": "first",
-                    "paintings": [{ "id": "first-art" }]
+                    "paintings": [{
+                        "id": "first-art",
+                        "top_left": { "x": 0.1, "y": 0.1 }
+                    }]
                 },
                 {
                     "start": { "x": 0.0, "y": 1.0 },
                     "end": { "x": 1.0, "y": 1.0 },
                     "texture_id": "deleted",
                     "paintings": [
-                        { "id": "deleted-art-1" },
-                        { "id": "deleted-art-2" },
-                        { "id": "deleted-art-3" },
-                        { "id": "deleted-art-4" },
-                        { "id": "deleted-art-5" },
-                        { "id": "deleted-art-6" },
-                        { "id": "deleted-art-7" }
+                        { "id": "deleted-art-1", "top_left": { "x": 0.1, "y": 0.1 } },
+                        { "id": "deleted-art-2", "top_left": { "x": 0.1, "y": 0.1 } },
+                        { "id": "deleted-art-3", "top_left": { "x": 0.1, "y": 0.1 } },
+                        { "id": "deleted-art-4", "top_left": { "x": 0.1, "y": 0.1 } },
+                        { "id": "deleted-art-5", "top_left": { "x": 0.1, "y": 0.1 } },
+                        { "id": "deleted-art-6", "top_left": { "x": 0.1, "y": 0.1 } },
+                        { "id": "deleted-art-7", "top_left": { "x": 0.1, "y": 0.1 } }
                     ]
                 },
                 {
                     "start": { "x": 0.0, "y": 2.0 },
                     "end": { "x": 1.0, "y": 2.0 },
                     "texture_id": "last",
-                    "paintings": [{ "id": "last-art" }]
+                    "paintings": [{
+                        "id": "last-art",
+                        "top_left": { "x": 0.1, "y": 0.1 }
+                    }]
                 }
             ]
         }"#;
@@ -352,7 +453,7 @@ mod tests {
     #[test]
     fn new_line_without_wall_metadata_serializes_without_inheriting_other_wall_data() {
         let source_json: Value = serde_json::from_str(
-            r#"{"walls":[{"start":{"x":0.0,"y":0.0},"end":{"x":1.0,"y":0.0},"texture_id":"first","paintings":[{"id":"art"}]}]}"#,
+            r#"{"walls":[{"start":{"x":0.0,"y":0.0},"end":{"x":1.0,"y":0.0},"texture_id":"first","paintings":[{"id":"art","top_left":{"x":0.1,"y":0.1}}]}]}"#,
         )
         .unwrap();
         let new_line = Line::from_endpoints(100, (3.0, 4.0), (5.0, 6.0));
@@ -361,6 +462,63 @@ mod tests {
         let updated: Value = serde_json::from_str(&updated).unwrap();
 
         assert_eq!(updated["walls"][0]["texture_id"], "");
+        assert!(updated["walls"][0].get("paintings").is_none());
+    }
+
+    #[test]
+    fn added_painting_is_written_with_texture_and_position() {
+        let line = Line::from_endpoints(0, (-1.5, 1.0), (1.5, 1.0)).with_paintings(vec![
+            crate::line::Painting::new(0, "tapestry".to_owned(), (0.25, 0.1), Some((0.75, 0.6))),
+        ]);
+
+        let updated =
+            serialize_world_with_lines(&super::empty_world_json(), &HashMap::new(), &[line])
+                .unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
+        assert_eq!(updated["walls"][0]["paintings"][0]["id"], "tapestry");
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["x"], 0.25);
+        assert_eq!(updated["walls"][0]["paintings"][0]["top_left"]["y"], 0.1);
+        assert_eq!(
+            updated["walls"][0]["paintings"][0]["bottom_right"]["x"],
+            0.75
+        );
+        assert_eq!(
+            updated["walls"][0]["paintings"][0]["bottom_right"]["y"],
+            0.6
+        );
+        assert!(
+            serde_json::from_str::<wasmfenbein3d::state::world::load_from_json::JsonWorld>(
+                &updated.to_string()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn deleting_last_painting_removes_its_json_array() {
+        let json_text = r#"{
+            "walls": [{
+                "start": { "x": 0.0, "y": 1.0 },
+                "end": { "x": 2.0, "y": 3.0 },
+                "texture_id": "wall",
+                "paintings": [{
+                    "id": "art",
+                    "top_left": { "x": 0.2, "y": 0.3 }
+                }]
+            }]
+        }"#;
+        let imported = parse_world_json(json_text, 0).unwrap();
+        imported.lines[0].set_paintings(Vec::new());
+
+        let updated = serialize_world_with_lines(
+            &imported.source_json,
+            &imported.wall_data_by_line_id,
+            &imported.lines,
+        )
+        .unwrap();
+        let updated: Value = serde_json::from_str(&updated).unwrap();
+
         assert!(updated["walls"][0].get("paintings").is_none());
     }
 }

@@ -15,6 +15,7 @@ const INVALID_JSON_STATUS: &str = "Waiting for valid JsonWorld JSON.";
 pub fn JsonWindow(
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<String>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
     next_line_id: RwSignal<usize>,
@@ -43,6 +44,7 @@ pub fn JsonWindow(
             event_target_value(&event),
             lines,
             textures,
+            painting_textures,
             floor_texture_id,
             ceiling_texture_id,
             wall_data_by_line_id,
@@ -132,6 +134,7 @@ pub fn JsonWindow(
                 </section>
                 <TextureWindow
                     textures=textures
+                    painting_textures=painting_textures
                     lines=lines
                     floor_texture_id=floor_texture_id
                     ceiling_texture_id=ceiling_texture_id
@@ -168,6 +171,7 @@ fn synchronize_json_text(
     for line in &current_lines {
         let _ = line.endpoints();
         let _ = line.texture_id();
+        let _ = line.paintings();
     }
     let mut source_json = match world_json.get_untracked() {
         Some(source_json) => source_json,
@@ -195,6 +199,7 @@ fn import_world_from_text(
     json_text_value: String,
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<String>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
     wall_data_by_line_id: RwSignal<Option<HashMap<usize, Value>>>,
@@ -211,6 +216,7 @@ fn import_world_from_text(
         Ok(imported_world) => {
             let line_count = imported_world.lines.len();
             textures.set(imported_world.textures);
+            painting_textures.set(imported_world.painting_textures);
             floor_texture_id.set(
                 imported_world
                     .source_json

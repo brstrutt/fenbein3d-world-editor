@@ -11,6 +11,7 @@ use leptos::prelude::*;
 pub fn App() -> impl IntoView {
     let lines = RwSignal::new(Vec::<Line>::new());
     let textures = RwSignal::new(Vec::<String>::new());
+    let painting_textures = RwSignal::new(Vec::<String>::new());
     let floor_texture_id = RwSignal::new(String::new());
     let ceiling_texture_id = RwSignal::new(String::new());
     let next_line_id = RwSignal::new(0usize);
@@ -27,10 +28,16 @@ pub fn App() -> impl IntoView {
                 scene_offset=scene_offset
                 zoom=zoom
             />
-            <LineInspector lines=lines textures=textures selected_line=selected_line />
+            <LineInspector
+                lines=lines
+                textures=textures
+                painting_textures=painting_textures
+                selected_line=selected_line
+            />
             <json_window::JsonWindow
                 lines=lines
                 textures=textures
+                painting_textures=painting_textures
                 floor_texture_id=floor_texture_id
                 ceiling_texture_id=ceiling_texture_id
                 next_line_id=next_line_id

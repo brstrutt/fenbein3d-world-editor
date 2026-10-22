@@ -1,4 +1,5 @@
 use leptos::{ev, prelude::*};
+use serde_json::{Value, json};
 
 pub const WORLD_UNIT_PX: f64 = 32.0;
 
@@ -8,6 +9,95 @@ pub struct Line {
     start: RwSignal<(f64, f64)>,
     end: RwSignal<(f64, f64)>,
     texture_id: RwSignal<Option<String>>,
+    paintings: RwSignal<Vec<Painting>>,
+    next_painting_id: RwSignal<usize>,
+}
+
+#[derive(Clone)]
+pub struct Painting {
+    key: usize,
+    texture_id: String,
+    top_left: (f64, f64),
+    bottom_right: Option<(f64, f64)>,
+    source_data: Value,
+}
+
+impl Painting {
+    pub fn new(
+        key: usize,
+        texture_id: String,
+        top_left: (f64, f64),
+        bottom_right: Option<(f64, f64)>,
+    ) -> Self {
+        Self {
+            key,
+            texture_id,
+            top_left,
+            bottom_right,
+            source_data: json!({}),
+        }
+    }
+
+    pub fn from_json(
+        key: usize,
+        texture_id: String,
+        top_left: (f64, f64),
+        bottom_right: Option<(f64, f64)>,
+        source_data: Value,
+    ) -> Self {
+        Self {
+            key,
+            texture_id,
+            top_left,
+            bottom_right,
+            source_data,
+        }
+    }
+
+    pub fn texture_id(&self) -> &str {
+        &self.texture_id
+    }
+
+    pub fn key(&self) -> usize {
+        self.key
+    }
+
+    pub fn top_left(&self) -> (f64, f64) {
+        self.top_left
+    }
+
+    pub fn bottom_right(&self) -> Option<(f64, f64)> {
+        self.bottom_right
+    }
+
+    pub fn set_texture_id(&mut self, texture_id: String) {
+        self.texture_id = texture_id;
+    }
+
+    pub fn set_top_left(&mut self, top_left: (f64, f64)) {
+        self.top_left = top_left;
+    }
+
+    pub fn set_bottom_right(&mut self, bottom_right: Option<(f64, f64)>) {
+        self.bottom_right = bottom_right;
+    }
+
+    pub fn to_json(&self) -> Value {
+        let mut data = self.source_data.clone();
+        if let Some(object) = data.as_object_mut() {
+            object.insert("id".to_owned(), json!(self.texture_id));
+            object.insert(
+                "top_left".to_owned(),
+                json!({ "x": self.top_left.0, "y": self.top_left.1 }),
+            );
+            if let Some((x, y)) = self.bottom_right {
+                object.insert("bottom_right".to_owned(), json!({ "x": x, "y": y }));
+            } else {
+                object.remove("bottom_right");
+            }
+        }
+        data
+    }
 }
 
 impl Line {
@@ -22,6 +112,8 @@ impl Line {
             start: RwSignal::new(start),
             end: RwSignal::new(end),
             texture_id: RwSignal::new(None),
+            paintings: RwSignal::new(Vec::new()),
+            next_painting_id: RwSignal::new(0),
         }
     }
 
@@ -40,6 +132,42 @@ impl Line {
 
     pub fn set_texture_id(&self, texture_id: Option<String>) {
         self.texture_id.set(texture_id);
+    }
+
+    pub fn with_paintings(self, paintings: Vec<Painting>) -> Self {
+        let next_painting_id = paintings
+            .iter()
+            .map(|painting| painting.key() + 1)
+            .max()
+            .unwrap_or_default();
+        self.paintings.set(paintings);
+        self.next_painting_id.set(next_painting_id);
+        self
+    }
+
+    pub fn paintings(&self) -> Vec<Painting> {
+        self.paintings.get()
+    }
+
+    pub fn paintings_untracked(&self) -> Vec<Painting> {
+        self.paintings.get_untracked()
+    }
+
+    pub fn set_paintings(&self, paintings: Vec<Painting>) {
+        self.paintings.set(paintings);
+    }
+
+    pub fn add_painting(
+        &self,
+        texture_id: String,
+        top_left: (f64, f64),
+        bottom_right: Option<(f64, f64)>,
+    ) {
+        let key = self.next_painting_id.get_untracked();
+        self.next_painting_id.set(key + 1);
+        self.paintings.update(|paintings| {
+            paintings.push(Painting::new(key, texture_id, top_left, bottom_right));
+        });
     }
 
     pub fn set_endpoint(&self, is_start: bool, position: (f64, f64)) {
@@ -187,9 +315,27 @@ pub fn WorldLine(
 pub fn LineInspector(
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<String>>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
     let mobile_expanded = RwSignal::new(false);
+    let active_painting_key = RwSignal::new(None::<usize>);
+
+    Effect::new({
+        let active_painting_key = active_painting_key;
+        move |_| {
+            let selected_id = selected_line.get();
+            let current_lines = lines.get();
+            let first_painting_key = selected_id.and_then(|id| {
+                current_lines
+                    .iter()
+                    .find(|line| line.id == id)
+                    .and_then(|line| line.paintings_untracked().first().map(Painting::key))
+            });
+            active_painting_key.set(first_painting_key);
+        }
+    });
+
     let set_coordinate = move |is_start: bool, is_x: bool, value: String| {
         let (Some(id), Ok(value)) = (selected_line.get_untracked(), value.parse::<f64>()) else {
             return;
@@ -234,6 +380,81 @@ pub fn LineInspector(
         lines.with_untracked(|lines| {
             if let Some(line) = lines.iter().find(|line| line.id == id) {
                 line.set_texture_id((!value.is_empty()).then_some(value));
+            }
+        });
+    };
+    let add_painting = move |_| {
+        let Some(id) = selected_line.get_untracked() else {
+            return;
+        };
+        let texture_id = painting_textures
+            .get_untracked()
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        lines.with_untracked(|lines| {
+            if let Some(line) = lines.iter().find(|line| line.id == id) {
+                line.add_painting(texture_id, (0.1, 0.1), Some((0.6, 0.6)));
+                if let Some(painting) = line.paintings_untracked().last() {
+                    active_painting_key.set(Some(painting.key()));
+                }
+            }
+        });
+    };
+    let set_painting_texture = move |key: usize, value: String| {
+        update_selected_painting(lines, selected_line, key, |painting| {
+            painting.set_texture_id(value);
+        });
+    };
+    let set_painting_coordinate = move |key: usize, is_x: bool, value: String| {
+        let Ok(value) = value.parse::<f64>() else {
+            return;
+        };
+        if !value.is_finite() {
+            return;
+        }
+        update_selected_painting(lines, selected_line, key, |painting| {
+            let (mut x, mut y) = painting.top_left();
+            if is_x {
+                x = value;
+            } else {
+                y = value;
+            }
+            painting.set_top_left((x, y));
+        });
+    };
+    let set_painting_bottom_right = move |key: usize, is_x: bool, value: String| {
+        let Ok(value) = value.parse::<f64>() else {
+            return;
+        };
+        if !value.is_finite() {
+            return;
+        }
+        update_selected_painting(lines, selected_line, key, |painting| {
+            let (top_x, top_y) = painting.top_left();
+            let (mut x, mut y) = painting
+                .bottom_right()
+                .unwrap_or((top_x + 0.5, top_y + 0.5));
+            if is_x {
+                x = value;
+            } else {
+                y = value;
+            }
+            painting.set_bottom_right(Some((x, y)));
+        });
+    };
+    let remove_painting = move |key: usize| {
+        let Some(id) = selected_line.get_untracked() else {
+            return;
+        };
+        lines.with_untracked(|lines| {
+            if let Some(line) = lines.iter().find(|line| line.id == id) {
+                let mut paintings = line.paintings_untracked();
+                paintings.retain(|painting| painting.key() != key);
+                if active_painting_key.get_untracked() == Some(key) {
+                    active_painting_key.set(paintings.first().map(Painting::key));
+                }
+                line.set_paintings(paintings);
             }
         });
     };
@@ -305,6 +526,193 @@ pub fn LineInspector(
                     />
                 </select>
             </section>
+            <section class="endpoint-details painting-details">
+                <header class="painting-heading">
+                    <h3>"Paintings"</h3>
+                    <button
+                        class="painting-add"
+                        type="button"
+                        on:click=add_painting
+                    >
+                        "+ Add painting"
+                    </button>
+                </header>
+                <Show
+                    when=move || selected().is_some_and(|line| !line.paintings().is_empty())
+                    fallback=|| view! { <p class="empty-paintings">"No paintings yet."</p> }
+                >
+                    {move || {
+                        selected().and_then(|line| {
+                            let paintings = line.paintings();
+                            let Some(painting) = paintings
+                                .iter()
+                                .find(|painting| Some(painting.key()) == active_painting_key.get())
+                                .cloned()
+                            else {
+                                return None;
+                            };
+                            let painting_key = painting.key();
+                            let painting_number = painting_key + 1;
+                            let texture_id = painting.texture_id().to_owned();
+                            let (top_left_x, top_left_y) = painting.top_left();
+                            let (bottom_right_x, bottom_right_y) = painting
+                                .bottom_right()
+                                .unwrap_or((top_left_x + 0.5, top_left_y + 0.5));
+                            Some(view! {
+                                <div class="painting-editor">
+                                    <div class="painting-picker">
+                                        <select
+                                            class="coordinate-input"
+                                            aria-label="Selected painting"
+                                            prop:value=move || {
+                                                active_painting_key
+                                                    .get()
+                                                    .map(|key| key.to_string())
+                                                    .unwrap_or_default()
+                                            }
+                                            on:change=move |event| {
+                                                active_painting_key.set(
+                                                    event_target_value(&event).parse().ok(),
+                                                )
+                                            }
+                                        >
+                                            <For
+                                                each=move || {
+                                                    selected()
+                                                        .map(|line| line.paintings())
+                                                        .unwrap_or_default()
+                                                }
+                                                key=|painting| painting.key()
+                                                children=move |painting| {
+                                                    let key = painting.key();
+                                                    let label = format!(
+                                                        "Painting {} — {}",
+                                                        key + 1,
+                                                        if painting.texture_id().is_empty() {
+                                                            "Unselected"
+                                                        } else {
+                                                            painting.texture_id()
+                                                        }
+                                                    );
+                                                    view! {
+                                                        <option value=key.to_string()>{label}</option>
+                                                    }
+                                                }
+                                            />
+                                        </select>
+                                        <button
+                                            class="painting-remove"
+                                            type="button"
+                                            aria-label=format!("Remove painting {painting_number}")
+                                            on:click=move |_| remove_painting(painting_key)
+                                        >
+                                            "Remove"
+                                        </button>
+                                    </div>
+                                    <label class="painting-texture-field">
+                                        "Texture"
+                                        <select
+                                            class="coordinate-input"
+                                            aria-label=format!("Painting {painting_number} texture")
+                                            prop:value=texture_id
+                                            on:change=move |event| {
+                                                set_painting_texture(
+                                                    painting_key,
+                                                    event_target_value(&event),
+                                                )
+                                            }
+                                        >
+                                            <option value="">"Unselected"</option>
+                                            <For
+                                                each=move || painting_textures.get()
+                                                key=|texture| texture.clone()
+                                                children=move |texture| {
+                                                    let texture_value = texture.clone();
+                                                    view! {
+                                                        <option value=texture_value>{texture}</option>
+                                                    }
+                                                }
+                                            />
+                                        </select>
+                                    </label>
+                                    <div class="painting-position">
+                                        <label>
+                                            "Left"
+                                            <input
+                                                class="coordinate-input"
+                                                type="number"
+                                                step="any"
+                                                aria-label=format!("Painting {painting_number} left position")
+                                                prop:value=top_left_x.to_string()
+                                                on:change=move |event| {
+                                                    set_painting_coordinate(
+                                                        painting_key,
+                                                        true,
+                                                        event_target_value(&event),
+                                                    )
+                                                }
+                                            />
+                                        </label>
+                                        <label>
+                                            "Top"
+                                            <input
+                                                class="coordinate-input"
+                                                type="number"
+                                                step="any"
+                                                aria-label=format!("Painting {painting_number} top position")
+                                                prop:value=top_left_y.to_string()
+                                                on:change=move |event| {
+                                                    set_painting_coordinate(
+                                                        painting_key,
+                                                        false,
+                                                        event_target_value(&event),
+                                                    )
+                                                }
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="painting-position">
+                                        <label>
+                                            "Right"
+                                            <input
+                                                class="coordinate-input"
+                                                type="number"
+                                                step="any"
+                                                aria-label=format!("Painting {painting_number} right position")
+                                                prop:value=bottom_right_x.to_string()
+                                                on:change=move |event| {
+                                                    set_painting_bottom_right(
+                                                        painting_key,
+                                                        true,
+                                                        event_target_value(&event),
+                                                    )
+                                                }
+                                            />
+                                        </label>
+                                        <label>
+                                            "Bottom"
+                                            <input
+                                                class="coordinate-input"
+                                                type="number"
+                                                step="any"
+                                                aria-label=format!("Painting {painting_number} bottom position")
+                                                prop:value=bottom_right_y.to_string()
+                                                on:change=move |event| {
+                                                    set_painting_bottom_right(
+                                                        painting_key,
+                                                        false,
+                                                        event_target_value(&event),
+                                                    )
+                                                }
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                            })
+                        })
+                    }}
+                </Show>
+            </section>
             <section class="endpoint-details">
                 <h3>"Start"</h3>
                 <dl>
@@ -369,6 +777,26 @@ pub fn LineInspector(
             </section>
         </aside>
     }
+}
+
+fn update_selected_painting(
+    lines: RwSignal<Vec<Line>>,
+    selected_line: RwSignal<Option<usize>>,
+    key: usize,
+    update: impl FnOnce(&mut Painting),
+) {
+    let Some(id) = selected_line.get_untracked() else {
+        return;
+    };
+    lines.with_untracked(|lines| {
+        if let Some(line) = lines.iter().find(|line| line.id == id) {
+            let mut paintings = line.paintings_untracked();
+            if let Some(painting) = paintings.iter_mut().find(|painting| painting.key() == key) {
+                update(painting);
+                line.set_paintings(paintings);
+            }
+        }
+    });
 }
 
 fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Option<usize>>) {

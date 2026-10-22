@@ -4,15 +4,17 @@ use leptos::{ev, prelude::*};
 #[component]
 pub fn TextureWindow(
     textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<String>>,
     lines: RwSignal<Vec<Line>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
 ) -> impl IntoView {
     let texture_draft = RwSignal::new(String::new());
+    let painting_texture_draft = RwSignal::new(String::new());
 
     view! {
         <details class="texture-library-panel">
-            <summary>"Manage textures"</summary>
+            <summary>"Manage wall, floor & ceiling textures"</summary>
             <section class="texture-library">
                 <form on:submit=move |event: ev::SubmitEvent| {
                     event.prevent_default();
@@ -46,6 +48,57 @@ pub fn TextureWindow(
                                                 lines,
                                                 floor_texture_id,
                                                 ceiling_texture_id,
+                                                &texture_id,
+                                            )
+                                        }
+                                    >
+                                        "Remove"
+                                    </button>
+                                </li>
+                            }
+                        }
+                    />
+                </ul>
+            </section>
+        </details>
+        <details class="texture-library-panel">
+            <summary>"Manage painting textures"</summary>
+            <section class="texture-library">
+                <p class="texture-library-note">
+                    "Painting textures do not need power-of-two dimensions."
+                </p>
+                <form on:submit=move |event: ev::SubmitEvent| {
+                    event.prevent_default();
+                    add_texture_id(painting_textures, painting_texture_draft);
+                }>
+                    <input
+                        class="texture-id-input"
+                        type="text"
+                        aria-label="Painting texture identifier"
+                        placeholder="Painting texture identifier"
+                        prop:value=move || painting_texture_draft.get()
+                        on:input=move |event| {
+                            painting_texture_draft.set(event_target_value(&event))
+                        }
+                    />
+                    <button class="texture-add-button" type="submit">"Add"</button>
+                </form>
+                <ul class="texture-list">
+                    <For
+                        each=move || painting_textures.get()
+                        key=|texture| texture.clone()
+                        children=move |texture| {
+                            let texture_id = texture.clone();
+                            view! {
+                                <li>
+                                    <span>{texture}</span>
+                                    <button
+                                        type="button"
+                                        aria-label=format!("Remove painting texture {texture_id}")
+                                        on:click=move |_| {
+                                            remove_painting_texture(
+                                                painting_textures,
+                                                lines,
                                                 &texture_id,
                                             )
                                         }
@@ -95,6 +148,25 @@ fn remove_texture_id(
             if line.texture_id_untracked().as_deref() == Some(texture_id) {
                 line.set_texture_id(None);
             }
+        }
+    });
+}
+
+fn remove_painting_texture(
+    textures: RwSignal<Vec<String>>,
+    lines: RwSignal<Vec<Line>>,
+    texture_id: &str,
+) {
+    textures.update(|textures| textures.retain(|existing| existing != texture_id));
+    lines.with_untracked(|lines| {
+        for line in lines {
+            let mut paintings = line.paintings_untracked();
+            for painting in &mut paintings {
+                if painting.texture_id() == texture_id {
+                    painting.set_texture_id(String::new());
+                }
+            }
+            line.set_paintings(paintings);
         }
     });
 }

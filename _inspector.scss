@@ -88,6 +88,74 @@
     font-size: 0.9rem;
 }
 
+.painting-heading,
+.painting-item-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.painting-heading {
+    margin-bottom: 10px;
+}
+
+.painting-heading h3 {
+    margin: 0;
+}
+
+.painting-add,
+.painting-remove {
+    min-height: 34px;
+    padding: 5px 8px;
+    border: 1px solid #c8d0cb;
+    border-radius: 3px;
+    background: #fff;
+    color: #20332c;
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.painting-add:hover,
+.painting-remove:hover {
+    background: #e4e9e5;
+}
+
+.painting-item {
+    display: grid;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid #e1e6e2;
+}
+
+.painting-item-heading {
+    color: #52645b;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.painting-texture-field,
+.painting-position label {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+    color: #65766e;
+    font-size: 0.8rem;
+}
+
+.painting-position {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.empty-paintings {
+    margin: 0;
+    color: #65766e;
+    font-size: 0.8rem;
+}
+
 .endpoint-details dl {
     display: grid;
     gap: 6px;
