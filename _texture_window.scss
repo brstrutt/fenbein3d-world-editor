@@ -72,3 +72,40 @@
     font-size: 0.8rem;
     overflow-wrap: anywhere;
 }
+
+.texture-list li.painting-texture-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 72px 72px auto;
+    gap: 6px;
+    overflow-wrap: normal;
+}
+
+.painting-texture-dimension-field {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: #65766e;
+    font-size: 0.7rem;
+}
+
+.painting-texture-id {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.painting-texture-dimension {
+    box-sizing: border-box;
+    width: 56px;
+    min-width: 0;
+    min-height: 32px;
+    padding: 4px;
+    border: 1px solid #c8d0cb;
+    border-radius: 3px;
+    background: #fbfcfb;
+    color: #20332c;
+    font: inherit;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}

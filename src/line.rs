@@ -5,6 +5,19 @@ pub const WORLD_UNIT_PX: f64 = 32.0;
 const PREVIEW_PAN_DRAG_THRESHOLD_PX: f64 = 3.0;
 const MIN_PAINTING_EDGE_LENGTH: f64 = 0.02;
 
+#[derive(Clone, PartialEq)]
+pub struct PaintingTexture {
+    pub id: String,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl PaintingTexture {
+    pub fn aspect_ratio(&self) -> f64 {
+        self.width / self.height
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Line {
     pub id: usize,
@@ -33,6 +46,7 @@ struct PaintingDragStart {
     top_left: (f64, f64),
     bottom_right: Option<(f64, f64)>,
     transform: (f64, f64, f64, f64),
+    aspect_ratio: f64,
     action: PaintingDragAction,
 }
 
@@ -360,7 +374,7 @@ pub fn WorldLine(
 pub fn LineInspector(
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
-    painting_textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<PaintingTexture>>,
     selected_line: RwSignal<Option<usize>>,
 ) -> impl IntoView {
     let mobile_expanded = RwSignal::new(false);
@@ -384,9 +398,13 @@ pub fn LineInspector(
                 PaintingDragAction::Move => {
                     translate_painting(drag_start.top_left, drag_start.bottom_right, delta)
                 }
-                PaintingDragAction::Resize(edge) => {
-                    resize_painting(drag_start.top_left, drag_start.bottom_right, edge, delta)
-                }
+                PaintingDragAction::Resize(edge) => resize_painting_with_aspect_ratio(
+                    drag_start.top_left,
+                    drag_start.bottom_right,
+                    drag_start.aspect_ratio,
+                    edge,
+                    delta,
+                ),
             };
 
             lines.with_untracked(|lines| {
@@ -528,7 +546,7 @@ pub fn LineInspector(
         let texture_id = painting_textures
             .get_untracked()
             .first()
-            .cloned()
+            .map(|texture| texture.id.clone())
             .unwrap_or_default();
         lines.with_untracked(|lines| {
             if let Some(line) = lines.iter().find(|line| line.id == id) {
@@ -579,10 +597,25 @@ pub fn LineInspector(
         });
     };
     let set_painting_custom_bottom_right = move |key: usize, enabled: bool| {
+        let aspect_ratio = selected()
+            .and_then(|line| {
+                line.paintings()
+                    .into_iter()
+                    .find(|painting| painting.key() == key)
+            })
+            .map(|painting| {
+                painting_aspect_ratio(
+                    painting_textures.get_untracked().as_slice(),
+                    painting.texture_id(),
+                )
+            })
+            .unwrap_or(1.0);
         update_selected_painting(lines, selected_line, key, |painting| {
             if enabled {
-                painting
-                    .set_bottom_right(Some(implicit_painting_bottom_right(painting.top_left())));
+                painting.set_bottom_right(Some(implicit_painting_bottom_right_with_aspect_ratio(
+                    painting.top_left(),
+                    aspect_ratio,
+                )));
             } else {
                 painting.set_bottom_right(None);
             }
@@ -832,7 +865,13 @@ pub fn LineInspector(
                                             let (right, bottom) = painting
                                                 .bottom_right()
                                                 .unwrap_or_else(|| {
-                                                    implicit_painting_bottom_right((left, top))
+                                                    implicit_painting_bottom_right_with_aspect_ratio(
+                                                        (left, top),
+                                                        painting_aspect_ratio(
+                                                            painting_textures.get().as_slice(),
+                                                            painting.texture_id(),
+                                                        ),
+                                                    )
                                                 });
                                             (left, top, right, bottom)
                                         })
@@ -960,7 +999,7 @@ pub fn LineInspector(
                                         event.prevent_default();
                                         event.stop_propagation();
                                         active_painting_key.set(Some(painting_key));
-                                        let Some((top_left, bottom_right)) = lines.with_untracked(|lines| {
+                                        let Some((top_left, bottom_right, texture_id)) = lines.with_untracked(|lines| {
                                             lines
                                                 .iter()
                                                 .find(|line| line.id == line_id)
@@ -969,14 +1008,25 @@ pub fn LineInspector(
                                                         .into_iter()
                                                         .find(|painting| painting.key() == painting_key)
                                                         .map(|painting| {
-                                                            (painting.top_left(), painting.bottom_right())
+                                                            (
+                                                                painting.top_left(),
+                                                                painting.bottom_right(),
+                                                                painting.texture_id().to_owned(),
+                                                            )
                                                         })
                                                 })
                                         }) else {
                                             return;
                                         };
+                                        let aspect_ratio = painting_aspect_ratio(
+                                            painting_textures.get_untracked().as_slice(),
+                                            &texture_id,
+                                        );
                                         let (right, bottom) = bottom_right.unwrap_or_else(|| {
-                                            implicit_painting_bottom_right(top_left)
+                                            implicit_painting_bottom_right_with_aspect_ratio(
+                                                top_left,
+                                                aspect_ratio,
+                                            )
                                         });
                                         let Some(target) = event
                                             .current_target()
@@ -1028,6 +1078,7 @@ pub fn LineInspector(
                                             top_left,
                                             bottom_right,
                                             transform,
+                                            aspect_ratio,
                                             action,
                                         }));
                                     }
@@ -1088,10 +1139,17 @@ pub fn LineInspector(
                             let painting_number = painting_key + 1;
                             let texture_id = painting.texture_id().to_owned();
                             let (top_left_x, top_left_y) = painting.top_left();
+                            let aspect_ratio = painting_aspect_ratio(
+                                painting_textures.get().as_slice(),
+                                painting.texture_id(),
+                            );
                             let (bottom_right_x, bottom_right_y) = painting
                                 .bottom_right()
                                 .unwrap_or_else(|| {
-                                    implicit_painting_bottom_right((top_left_x, top_left_y))
+                                implicit_painting_bottom_right_with_aspect_ratio(
+                                        (top_left_x, top_left_y),
+                                        aspect_ratio,
+                                    )
                                 });
                             Some(view! {
                                 <div class="painting-editor">
@@ -1121,11 +1179,11 @@ pub fn LineInspector(
                                             <option value="">"Unselected"</option>
                                             <For
                                                 each=move || painting_textures.get()
-                                                key=|texture| texture.clone()
+                                                key=|texture| texture.id.clone()
                                                 children=move |texture| {
-                                                    let texture_value = texture.clone();
+                                                    let texture_value = texture.id.clone();
                                                     view! {
-                                                        <option value=texture_value>{texture}</option>
+                                                        <option value=texture_value>{texture.id}</option>
                                                     }
                                                 }
                                             />
@@ -1399,14 +1457,26 @@ fn painting_edge_at_point(
     closest.map(|(edge, _)| edge)
 }
 
+#[cfg(test)]
 fn resize_painting(
     (left, top): (f64, f64),
     bottom_right: Option<(f64, f64)>,
     edge: PaintingEdge,
     (delta_x, delta_y): (f64, f64),
 ) -> ((f64, f64), Option<(f64, f64)>) {
-    let (right, bottom) =
-        bottom_right.unwrap_or_else(|| implicit_painting_bottom_right((left, top)));
+    resize_painting_with_aspect_ratio((left, top), bottom_right, 1.0, edge, (delta_x, delta_y))
+}
+
+fn resize_painting_with_aspect_ratio(
+    (left, top): (f64, f64),
+    bottom_right: Option<(f64, f64)>,
+    aspect_ratio: f64,
+    edge: PaintingEdge,
+    (delta_x, delta_y): (f64, f64),
+) -> ((f64, f64), Option<(f64, f64)>) {
+    let (right, bottom) = bottom_right.unwrap_or_else(|| {
+        implicit_painting_bottom_right_with_aspect_ratio((left, top), aspect_ratio)
+    });
     if bottom_right.is_none()
         && match edge {
             PaintingEdge::Left | PaintingEdge::Right => delta_x == 0.0,
@@ -1463,7 +1533,7 @@ fn resize_painting(
                 left,
                 (left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH),
             );
-            let height = right - new_left;
+            let height = (right - new_left) / aspect_ratio;
             let new_top = snap_changed_coordinate(top, 1.0 - height / 2.0);
             ((new_left, new_top), None)
         }
@@ -1472,7 +1542,7 @@ fn resize_painting(
                 right,
                 (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH),
             );
-            let height = new_right - left;
+            let height = (new_right - left) / aspect_ratio;
             let new_top = snap_changed_coordinate(top, 1.0 - height / 2.0);
             ((left, new_top), None)
         }
@@ -1529,9 +1599,26 @@ fn translate_painting(
     }
 }
 
+#[cfg(test)]
 fn implicit_painting_bottom_right((left, top): (f64, f64)) -> (f64, f64) {
+    implicit_painting_bottom_right_with_aspect_ratio((left, top), 1.0)
+}
+
+fn implicit_painting_bottom_right_with_aspect_ratio(
+    (left, top): (f64, f64),
+    aspect_ratio: f64,
+) -> (f64, f64) {
     let bottom = 2.0 - top;
-    (left + bottom - top, bottom)
+    (left + (bottom - top) * aspect_ratio, bottom)
+}
+
+fn painting_aspect_ratio(textures: &[PaintingTexture], texture_id: &str) -> f64 {
+    textures
+        .iter()
+        .find(|texture| texture.id == texture_id)
+        .map(PaintingTexture::aspect_ratio)
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+        .unwrap_or(1.0)
 }
 
 fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Option<usize>>) {
@@ -1546,8 +1633,9 @@ fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Opti
 mod tests {
     use super::{
         PaintingEdge, PreviewViewBox, default_preview_view_box, implicit_painting_bottom_right,
-        inverse_svg_transform_delta, inverse_svg_transform_point, painting_edge_at_point,
-        preview_pan_threshold_reached, resize_painting, snap_preview_coordinate,
+        implicit_painting_bottom_right_with_aspect_ratio, inverse_svg_transform_delta,
+        inverse_svg_transform_point, painting_edge_at_point, preview_pan_threshold_reached,
+        resize_painting, resize_painting_with_aspect_ratio, snap_preview_coordinate,
         translate_painting, wall_width, zoom_preview_view_box,
     };
 
@@ -1561,6 +1649,35 @@ mod tests {
     fn implicit_painting_bottom_right_is_square_and_balanced_on_wall() {
         assert_eq!(implicit_painting_bottom_right((0.25, 0.5)), (1.25, 1.5));
         assert_eq!(implicit_painting_bottom_right((2.0, 0.0)), (4.0, 2.0));
+    }
+
+    #[test]
+    fn implicit_painting_bounds_use_texture_aspect_ratio() {
+        assert_eq!(
+            implicit_painting_bottom_right_with_aspect_ratio((0.25, 0.5), 2.0),
+            (2.25, 1.5)
+        );
+        assert_eq!(
+            implicit_painting_bottom_right_with_aspect_ratio((0.25, 0.5), 0.5),
+            (0.75, 1.5)
+        );
+    }
+
+    #[test]
+    fn implicit_painting_resizing_preserves_texture_aspect_ratio() {
+        let resized = resize_painting_with_aspect_ratio(
+            (0.5, 0.5),
+            None,
+            2.0,
+            PaintingEdge::Right,
+            (0.25, 0.0),
+        );
+        let (left, top) = resized.0;
+        let (right, bottom) = implicit_painting_bottom_right_with_aspect_ratio((left, top), 2.0);
+
+        assert_eq!(resized.1, None);
+        assert!((right - left - (bottom - top) * 2.0).abs() < 1e-12);
+        assert!((top - (1.0 - (bottom - top) / 2.0)).abs() < 1e-12);
     }
 
     #[test]

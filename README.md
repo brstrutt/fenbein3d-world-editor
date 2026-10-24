@@ -2,7 +2,7 @@
 
 ![AI-assisted](https://img.shields.io/badge/AI--assisted-yes-8250df)
 
-A browser-based world editor for the [fenbein3d engine](https://github.com/brstrutt/wasmfenbein3d). This is an early prototype: you can add and move wall lines, edit line coordinates and paintings, manage separate wall and painting texture lists, and import wall data from a `JsonWorld` JSON object. In the wall preview, scroll or use the zoom buttons to zoom, drag empty space to pan, and drag paintings to reposition them.
+A browser-based world editor for the [fenbein3d engine](https://github.com/brstrutt/wasmfenbein3d). This is an early prototype: you can add and move wall lines, edit line coordinates and paintings, manage separate wall and painting texture lists, and import wall data from a `JsonWorld` JSON object. Painting texture pixel width and height are configured in the painting texture list; both default to `1` and are preserved in the editor's `painting_texture_dimensions` JSON property. Paintings without explicit bottom-right coordinates use their texture's calculated width-to-height ratio in the wall preview and when resized. In the wall preview, scroll or use the zoom buttons to zoom, drag empty space to pan, and drag paintings to reposition them.
 To see the latest live version go to [https://brstrutt.github.io/fenbein3d-world-editor/](https://brstrutt.github.io/fenbein3d-world-editor/)
 
 ## Getting started

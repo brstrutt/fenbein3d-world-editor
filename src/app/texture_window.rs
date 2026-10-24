@@ -1,10 +1,10 @@
-use crate::line::Line;
+use crate::line::{Line, PaintingTexture};
 use leptos::{ev, prelude::*};
 
 #[component]
 pub fn TextureWindow(
     textures: RwSignal<Vec<String>>,
-    painting_textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<PaintingTexture>>,
     lines: RwSignal<Vec<Line>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
@@ -65,11 +65,11 @@ pub fn TextureWindow(
             <summary>"Manage painting textures"</summary>
             <section class="texture-library">
                 <p class="texture-library-note">
-                    "Painting textures do not need power-of-two dimensions."
+                    "Painting textures do not need power-of-two dimensions. Set their source pixel width and height."
                 </p>
                 <form on:submit=move |event: ev::SubmitEvent| {
                     event.prevent_default();
-                    add_texture_id(painting_textures, painting_texture_draft);
+                    add_painting_texture(painting_textures, painting_texture_draft);
                 }>
                     <input
                         class="texture-id-input"
@@ -86,12 +86,59 @@ pub fn TextureWindow(
                 <ul class="texture-list">
                     <For
                         each=move || painting_textures.get()
-                        key=|texture| texture.clone()
+                        key=|texture| texture.id.clone()
                         children=move |texture| {
-                            let texture_id = texture.clone();
+                            let texture_id = texture.id.clone();
+                            let width_texture_id = texture_id.clone();
+                            let height_texture_id = texture_id.clone();
+                            let remove_texture_id = texture_id.clone();
+                            let width = texture.width;
+                            let height = texture.height;
                             view! {
-                                <li>
-                                    <span>{texture}</span>
+                                <li class="painting-texture-row">
+                                    <span class="painting-texture-id" title=texture_id.clone()>
+                                        {texture_id.clone()}
+                                    </span>
+                                    <label class="painting-texture-dimension-field">
+                                        "W"
+                                        <input
+                                            class="painting-texture-dimension"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            aria-label=format!("Painting texture {texture_id} width in pixels")
+                                            title="Width in pixels"
+                                            prop:value=width.to_string()
+                                            on:change=move |event| {
+                                                set_painting_texture_dimension(
+                                                    painting_textures,
+                                                    &width_texture_id,
+                                                    true,
+                                                    event_target_value(&event),
+                                                )
+                                            }
+                                        />
+                                    </label>
+                                    <label class="painting-texture-dimension-field">
+                                        "H"
+                                        <input
+                                            class="painting-texture-dimension"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            aria-label=format!("Painting texture {texture_id} height in pixels")
+                                            title="Height in pixels"
+                                            prop:value=height.to_string()
+                                            on:change=move |event| {
+                                                set_painting_texture_dimension(
+                                                    painting_textures,
+                                                    &height_texture_id,
+                                                    false,
+                                                    event_target_value(&event),
+                                                )
+                                            }
+                                        />
+                                    </label>
                                     <button
                                         type="button"
                                         aria-label=format!("Remove painting texture {texture_id}")
@@ -99,7 +146,7 @@ pub fn TextureWindow(
                                             remove_painting_texture(
                                                 painting_textures,
                                                 lines,
-                                                &texture_id,
+                                                &remove_texture_id,
                                             )
                                         }
                                     >
@@ -113,6 +160,48 @@ pub fn TextureWindow(
             </section>
         </details>
     }
+}
+
+fn add_painting_texture(textures: RwSignal<Vec<PaintingTexture>>, texture_draft: RwSignal<String>) {
+    let texture_id = texture_draft.get_untracked().trim().to_owned();
+    if texture_id.is_empty() {
+        return;
+    }
+
+    textures.update(|textures| {
+        if !textures.iter().any(|existing| existing.id == texture_id) {
+            textures.push(PaintingTexture {
+                id: texture_id.clone(),
+                width: 1.0,
+                height: 1.0,
+            });
+        }
+    });
+    texture_draft.set(String::new());
+}
+
+fn set_painting_texture_dimension(
+    textures: RwSignal<Vec<PaintingTexture>>,
+    texture_id: &str,
+    is_width: bool,
+    value: String,
+) {
+    let Ok(dimension) = value.parse::<f64>() else {
+        return;
+    };
+    if !dimension.is_finite() || dimension <= 0.0 || dimension.fract() != 0.0 {
+        return;
+    }
+
+    textures.update(|textures| {
+        if let Some(texture) = textures.iter_mut().find(|texture| texture.id == texture_id) {
+            if is_width {
+                texture.width = dimension;
+            } else {
+                texture.height = dimension;
+            }
+        }
+    });
 }
 
 fn add_texture_id(textures: RwSignal<Vec<String>>, texture_draft: RwSignal<String>) {
@@ -153,11 +242,11 @@ fn remove_texture_id(
 }
 
 fn remove_painting_texture(
-    textures: RwSignal<Vec<String>>,
+    textures: RwSignal<Vec<PaintingTexture>>,
     lines: RwSignal<Vec<Line>>,
     texture_id: &str,
 ) {
-    textures.update(|textures| textures.retain(|existing| existing != texture_id));
+    textures.update(|textures| textures.retain(|existing| existing.id != texture_id));
     lines.with_untracked(|lines| {
         for line in lines {
             let mut paintings = line.paintings_untracked();

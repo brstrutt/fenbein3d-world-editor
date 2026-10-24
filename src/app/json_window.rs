@@ -1,7 +1,7 @@
 mod world_json;
 
 use super::texture_window::TextureWindow;
-use crate::line::Line;
+use crate::line::{Line, PaintingTexture};
 use leptos::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ const INVALID_JSON_STATUS: &str = "Waiting for valid JsonWorld JSON.";
 pub fn JsonWindow(
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
-    painting_textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<PaintingTexture>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
     next_line_id: RwSignal<usize>,
@@ -30,6 +30,7 @@ pub fn JsonWindow(
     Effect::new(move |_| {
         synchronize_json_text(
             lines,
+            painting_textures,
             floor_texture_id,
             ceiling_texture_id,
             world_json,
@@ -160,6 +161,7 @@ pub fn JsonWindow(
 
 fn synchronize_json_text(
     lines: RwSignal<Vec<Line>>,
+    painting_textures: RwSignal<Vec<PaintingTexture>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
     world_json: RwSignal<Option<Value>>,
@@ -168,6 +170,7 @@ fn synchronize_json_text(
     import_status: RwSignal<String>,
 ) {
     let current_lines = lines.get();
+    let current_painting_textures = painting_textures.get();
     for line in &current_lines {
         let _ = line.endpoints();
         let _ = line.texture_id();
@@ -188,6 +191,30 @@ fn synchronize_json_text(
     };
     source_json["floor_texture_id"] = serde_json::json!(floor_texture_id.get());
     source_json["ceiling_texture_id"] = serde_json::json!(ceiling_texture_id.get());
+    if let Some(object) = source_json.as_object_mut() {
+        object.remove("painting_texture_aspect_ratios");
+        if current_painting_textures.is_empty() {
+            object.remove("painting_texture_dimensions");
+        } else {
+            object.insert(
+                "painting_texture_dimensions".to_owned(),
+                serde_json::json!(
+                    current_painting_textures
+                        .iter()
+                        .map(|texture| {
+                            (
+                                &texture.id,
+                                serde_json::json!({
+                                    "width": texture.width,
+                                    "height": texture.height
+                                }),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>()
+                ),
+            );
+        }
+    }
 
     match serialize_world_with_lines(&source_json, &wall_data_by_line_id, &current_lines) {
         Ok(updated_json) => json_text.set(updated_json),
@@ -199,7 +226,7 @@ fn import_world_from_text(
     json_text_value: String,
     lines: RwSignal<Vec<Line>>,
     textures: RwSignal<Vec<String>>,
-    painting_textures: RwSignal<Vec<String>>,
+    painting_textures: RwSignal<Vec<PaintingTexture>>,
     floor_texture_id: RwSignal<String>,
     ceiling_texture_id: RwSignal<String>,
     wall_data_by_line_id: RwSignal<Option<HashMap<usize, Value>>>,
@@ -248,7 +275,7 @@ fn import_world_from_text(
 mod tests {
     use super::synchronize_json_text;
     use crate::app::json_window::world_json::empty_world_json;
-    use crate::line::Line;
+    use crate::line::{Line, PaintingTexture};
     use leptos::prelude::*;
     use serde_json::Value;
     use std::collections::HashMap;
@@ -260,6 +287,7 @@ mod tests {
         let json_text = RwSignal::new(String::new());
 
         synchronize_json_text(
+            RwSignal::new(Vec::new()),
             RwSignal::new(Vec::new()),
             floor_texture_id,
             ceiling_texture_id,
@@ -285,6 +313,7 @@ mod tests {
 
         synchronize_json_text(
             RwSignal::new(vec![line]),
+            RwSignal::new(Vec::new()),
             RwSignal::new(String::new()),
             RwSignal::new(String::new()),
             RwSignal::new(Some(empty_world_json())),
@@ -300,6 +329,54 @@ mod tests {
             updated["walls"][0]["paintings"][0]
                 .get("bottom_right")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn painting_texture_dimensions_are_written_to_json() {
+        let line = Line::from_endpoints(0, (0.0, 0.0), (3.0, 0.0));
+        line.add_painting("wide-art".to_owned(), (0.1, 0.1), None);
+        let painting_textures = RwSignal::new(vec![
+            PaintingTexture {
+                id: "wide-art".to_owned(),
+                width: 1920.0,
+                height: 1080.0,
+            },
+            PaintingTexture {
+                id: "unused-art".to_owned(),
+                width: 600.0,
+                height: 800.0,
+            },
+        ]);
+        let json_text = RwSignal::new(String::new());
+
+        synchronize_json_text(
+            RwSignal::new(vec![line]),
+            painting_textures,
+            RwSignal::new(String::new()),
+            RwSignal::new(String::new()),
+            RwSignal::new(Some(empty_world_json())),
+            RwSignal::new(Some(HashMap::new())),
+            json_text,
+            RwSignal::new(String::new()),
+        );
+
+        let updated: Value = serde_json::from_str(&json_text.get_untracked()).unwrap();
+        assert_eq!(
+            updated["painting_texture_dimensions"]["wide-art"]["width"],
+            1920.0
+        );
+        assert_eq!(
+            updated["painting_texture_dimensions"]["wide-art"]["height"],
+            1080.0
+        );
+        assert_eq!(
+            updated["painting_texture_dimensions"]["unused-art"]["width"],
+            600.0
+        );
+        assert_eq!(
+            updated["painting_texture_dimensions"]["unused-art"]["height"],
+            800.0
         );
     }
 }

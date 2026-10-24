@@ -1,4 +1,4 @@
-use crate::line::{Line, Painting};
+use crate::line::{Line, Painting, PaintingTexture};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ struct JsonPoint {
 pub(super) struct ImportedWorld {
     pub lines: Vec<Line>,
     pub textures: Vec<String>,
-    pub painting_textures: Vec<String>,
+    pub painting_textures: Vec<PaintingTexture>,
     pub wall_data_by_line_id: HashMap<usize, Value>,
     pub source_json: Value,
 }
@@ -52,7 +52,7 @@ pub(super) fn parse_world_json(
     let source_json: Value = serde_json::from_str(json_text)?;
     let world: JsonWorld = serde_json::from_value(source_json.clone())?;
     let textures = collect_texture_ids(&source_json);
-    let painting_textures = collect_painting_texture_ids(&source_json);
+    let painting_textures = collect_painting_textures(&source_json);
     let wall_source_data = source_json
         .get("walls")
         .and_then(Value::as_array)
@@ -192,20 +192,77 @@ fn collect_texture_ids(world: &Value) -> Vec<String> {
     texture_ids
 }
 
-fn collect_painting_texture_ids(world: &Value) -> Vec<String> {
-    let mut texture_ids = Vec::new();
+fn collect_painting_textures(world: &Value) -> Vec<PaintingTexture> {
+    let mut painting_textures = Vec::new();
     if let Some(walls) = world.get("walls").and_then(Value::as_array) {
         for wall in walls {
             if let Some(paintings) = wall.get("paintings").and_then(Value::as_array) {
                 for painting in paintings {
                     if let Some(texture_id) = painting.get("id").and_then(Value::as_str) {
-                        add_texture_id(&mut texture_ids, texture_id);
+                        add_painting_texture(&mut painting_textures, texture_id, 1.0, 1.0);
                     }
                 }
             }
         }
     }
-    texture_ids
+    if let Some(dimensions) = world
+        .get("painting_texture_dimensions")
+        .and_then(Value::as_object)
+    {
+        for (texture_id, size) in dimensions {
+            let width = size
+                .get("width")
+                .and_then(Value::as_f64)
+                .filter(|dimension| {
+                    dimension.is_finite() && *dimension > 0.0 && dimension.fract() == 0.0
+                })
+                .unwrap_or(1.0);
+            let height = size
+                .get("height")
+                .and_then(Value::as_f64)
+                .filter(|dimension| {
+                    dimension.is_finite() && *dimension > 0.0 && dimension.fract() == 0.0
+                })
+                .unwrap_or(1.0);
+            add_painting_texture(&mut painting_textures, texture_id, width, height);
+        }
+    } else if let Some(ratios) = world
+        .get("painting_texture_aspect_ratios")
+        .and_then(Value::as_object)
+    {
+        for (texture_id, ratio) in ratios {
+            let width = ratio
+                .as_f64()
+                .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+                .unwrap_or(1.0);
+            add_painting_texture(&mut painting_textures, texture_id, width, 1.0);
+        }
+    }
+    painting_textures
+}
+
+fn add_painting_texture(
+    painting_textures: &mut Vec<PaintingTexture>,
+    texture_id: &str,
+    width: f64,
+    height: f64,
+) {
+    if texture_id.is_empty() {
+        return;
+    }
+    if let Some(texture) = painting_textures
+        .iter_mut()
+        .find(|texture| texture.id == texture_id)
+    {
+        texture.width = width;
+        texture.height = height;
+    } else {
+        painting_textures.push(PaintingTexture {
+            id: texture_id.to_owned(),
+            width,
+            height,
+        });
+    }
 }
 
 fn add_texture_id(texture_ids: &mut Vec<String>, texture_id: &str) {
@@ -218,7 +275,7 @@ fn add_texture_id(texture_ids: &mut Vec<String>, texture_id: &str) {
 mod tests {
     use super::{parse_world_json, serialize_world_with_lines};
     use crate::line::Line;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::collections::HashMap;
 
     #[test]
@@ -252,8 +309,70 @@ mod tests {
             Some("wall")
         );
         assert_eq!(imported.textures, ["floor", "ceiling", "wall"]);
-        assert_eq!(imported.painting_textures, ["art"]);
+        assert_eq!(imported.painting_textures[0].id, "art");
+        assert_eq!(imported.painting_textures[0].aspect_ratio(), 1.0);
         assert_eq!(imported.lines[0].paintings()[0].top_left(), (0.2, 0.3));
+    }
+
+    #[test]
+    fn imports_painting_texture_dimensions_and_keeps_square_default() {
+        let imported = parse_world_json(
+            r#"{
+                "painting_texture_dimensions": {
+                    "wide-art": { "width": 1920, "height": 1080 },
+                    "unused-art": { "width": 800, "height": 1600 },
+                    "invalid-art": { "width": 0, "height": 0 }
+                },
+                "walls": [{
+                    "start": { "x": 0.0, "y": 0.0 },
+                    "end": { "x": 2.0, "y": 0.0 },
+                    "paintings": [{
+                        "id": "square-art",
+                        "top_left": { "x": 0.1, "y": 0.1 }
+                    }]
+                }]
+            }"#,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(
+            imported
+                .painting_textures
+                .iter()
+                .map(|texture| { (texture.id.as_str(), (texture.width, texture.height),) })
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                ("wide-art", (1920.0, 1080.0)),
+                ("unused-art", (800.0, 1600.0)),
+                ("invalid-art", (1.0, 1.0)),
+                ("square-art", (1.0, 1.0)),
+            ])
+        );
+        assert_eq!(
+            imported
+                .painting_textures
+                .iter()
+                .find(|texture| texture.id == "wide-art")
+                .unwrap()
+                .aspect_ratio(),
+            1920.0 / 1080.0
+        );
+    }
+
+    #[test]
+    fn imports_legacy_painting_texture_aspect_ratios() {
+        let imported = parse_world_json(
+            r#"{
+                "painting_texture_aspect_ratios": { "wide-art": 1.5 },
+                "walls": []
+            }"#,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(imported.painting_textures[0].width, 1.5);
+        assert_eq!(imported.painting_textures[0].height, 1.0);
     }
 
     #[test]
@@ -283,6 +402,23 @@ mod tests {
             .is_ok()
         );
         assert!(parse_world_json(&updated.to_string(), 1).is_ok());
+    }
+
+    #[test]
+    fn world_json_with_painting_texture_dimensions_is_accepted_by_engine() {
+        let world = json!({
+            "floor_texture_id": "",
+            "ceiling_texture_id": "",
+            "painting_texture_dimensions": {
+                "wide-art": { "width": 1920, "height": 1080 }
+            },
+            "walls": []
+        });
+
+        assert!(
+            serde_json::from_value::<wasmfenbein3d::state::world::load_from_json::JsonWorld>(world)
+                .is_ok()
+        );
     }
 
     #[test]

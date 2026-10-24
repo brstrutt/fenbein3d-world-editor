@@ -4,14 +4,14 @@ mod toolbar;
 mod world_scene;
 mod zoom;
 
-use crate::line::{Line, LineInspector};
+use crate::line::{Line, LineInspector, PaintingTexture};
 use leptos::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoView {
     let lines = RwSignal::new(Vec::<Line>::new());
     let textures = RwSignal::new(Vec::<String>::new());
-    let painting_textures = RwSignal::new(Vec::<String>::new());
+    let painting_textures = RwSignal::new(Vec::<PaintingTexture>::new());
     let floor_texture_id = RwSignal::new(String::new());
     let ceiling_texture_id = RwSignal::new(String::new());
     let next_line_id = RwSignal::new(0usize);
