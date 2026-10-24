@@ -589,6 +589,9 @@ pub fn LineInspector(
         lines.with_untracked(|lines| {
             if let Some(line) = lines.iter().find(|line| line.id == id) {
                 line.add_painting(texture_id, (0.1, 0.1), None);
+                if let Some(painting) = line.paintings_untracked().last() {
+                    active_painting_key.set(Some(painting.key()));
+                }
             }
         });
     };
