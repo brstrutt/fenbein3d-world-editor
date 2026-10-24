@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 pub const WORLD_UNIT_PX: f64 = 32.0;
 const PREVIEW_PAN_DRAG_THRESHOLD_PX: f64 = 3.0;
+const MIN_PAINTING_EDGE_LENGTH: f64 = 0.02;
 
 #[derive(Clone, Copy)]
 pub struct Line {
@@ -32,6 +33,21 @@ struct PaintingDragStart {
     top_left: (f64, f64),
     bottom_right: Option<(f64, f64)>,
     transform: (f64, f64, f64, f64),
+    action: PaintingDragAction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaintingEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Copy)]
+enum PaintingDragAction {
+    Move,
+    Resize(PaintingEdge),
 }
 
 #[derive(Clone, Copy)]
@@ -363,8 +379,14 @@ pub fn LineInspector(
             else {
                 return;
             };
-            let (top_left, bottom_right) =
-                translate_painting(drag_start.top_left, drag_start.bottom_right, delta);
+            let (top_left, bottom_right) = match drag_start.action {
+                PaintingDragAction::Move => {
+                    translate_painting(drag_start.top_left, drag_start.bottom_right, delta)
+                }
+                PaintingDragAction::Resize(edge) => {
+                    resize_painting(drag_start.top_left, drag_start.bottom_right, edge, delta)
+                }
+            };
 
             lines.with_untracked(|lines| {
                 if let Some(line) = lines.iter().find(|line| line.id == drag_start.line_id) {
@@ -826,6 +848,28 @@ pub fn LineInspector(
                                             .get()
                                             .is_some_and(|drag| drag.painting_key == painting_key)
                                     }
+                                    class:resizing-horizontal=move || {
+                                        painting_drag_start.get().is_some_and(|drag| {
+                                            drag.painting_key == painting_key
+                                                && matches!(
+                                                    drag.action,
+                                                    PaintingDragAction::Resize(
+                                                        PaintingEdge::Left | PaintingEdge::Right
+                                                    )
+                                                )
+                                        })
+                                    }
+                                    class:resizing-vertical=move || {
+                                        painting_drag_start.get().is_some_and(|drag| {
+                                            drag.painting_key == painting_key
+                                                && matches!(
+                                                    drag.action,
+                                                    PaintingDragAction::Resize(
+                                                        PaintingEdge::Top | PaintingEdge::Bottom
+                                                    )
+                                                )
+                                        })
+                                    }
                                     role="button"
                                     tabindex="0"
                                     aria-label=painting_label
@@ -864,6 +908,9 @@ pub fn LineInspector(
                                         }) else {
                                             return;
                                         };
+                                        let (right, bottom) = bottom_right.unwrap_or_else(|| {
+                                            implicit_painting_bottom_right(top_left)
+                                        });
                                         let Some(target) = event
                                             .current_target()
                                             .and_then(|target| {
@@ -877,6 +924,35 @@ pub fn LineInspector(
                                         let Some(matrix) = target.get_screen_ctm() else {
                                             return;
                                         };
+                                        let transform = (
+                                            f64::from(matrix.a()),
+                                            f64::from(matrix.b()),
+                                            f64::from(matrix.c()),
+                                            f64::from(matrix.d()),
+                                        );
+                                        let action = inverse_svg_transform_point(
+                                            (
+                                                transform.0,
+                                                transform.1,
+                                                transform.2,
+                                                transform.3,
+                                                f64::from(matrix.e()),
+                                                f64::from(matrix.f()),
+                                            ),
+                                            (
+                                                f64::from(event.client_x()),
+                                                f64::from(event.client_y()),
+                                            ),
+                                        )
+                                        .and_then(|point| {
+                                            painting_edge_at_point(
+                                                (top_left.0, top_left.1, right, bottom),
+                                                transform,
+                                                point,
+                                                8.0,
+                                            )
+                                        })
+                                        .map_or(PaintingDragAction::Move, PaintingDragAction::Resize);
                                         painting_drag_start.set(Some(PaintingDragStart {
                                             line_id,
                                             painting_key,
@@ -884,12 +960,8 @@ pub fn LineInspector(
                                             pointer_y: f64::from(event.client_y()),
                                             top_left,
                                             bottom_right,
-                                            transform: (
-                                                f64::from(matrix.a()),
-                                                f64::from(matrix.b()),
-                                                f64::from(matrix.c()),
-                                                f64::from(matrix.d()),
-                                            ),
+                                            transform,
+                                            action,
                                         }));
                                     }
                                     on:keydown=move |event: ev::KeyboardEvent| {
@@ -1234,6 +1306,91 @@ fn inverse_svg_transform_point(
     inverse_svg_transform_delta((a, b, c, d), (screen_x - e, screen_y - f))
 }
 
+fn painting_edge_at_point(
+    (left, top, right, bottom): (f64, f64, f64, f64),
+    (a, b, c, d): (f64, f64, f64, f64),
+    (x, y): (f64, f64),
+    threshold_px: f64,
+) -> Option<PaintingEdge> {
+    let x_scale = a.hypot(b);
+    let y_scale = c.hypot(d);
+    let mut closest = None::<(PaintingEdge, f64)>;
+
+    for (edge, distance) in [
+        (PaintingEdge::Left, (x - left).abs() * x_scale),
+        (PaintingEdge::Right, (right - x).abs() * x_scale),
+        (PaintingEdge::Top, (y - top).abs() * y_scale),
+        (PaintingEdge::Bottom, (bottom - y).abs() * y_scale),
+    ] {
+        if distance <= threshold_px
+            && closest.is_none_or(|(_, closest_distance)| distance < closest_distance)
+        {
+            closest = Some((edge, distance));
+        }
+    }
+
+    closest.map(|(edge, _)| edge)
+}
+
+fn resize_painting(
+    (left, top): (f64, f64),
+    bottom_right: Option<(f64, f64)>,
+    edge: PaintingEdge,
+    (delta_x, delta_y): (f64, f64),
+) -> ((f64, f64), Option<(f64, f64)>) {
+    let (right, bottom) =
+        bottom_right.unwrap_or_else(|| implicit_painting_bottom_right((left, top)));
+    if bottom_right.is_some() {
+        return match edge {
+            PaintingEdge::Left => (
+                ((left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH), top),
+                Some((right, bottom)),
+            ),
+            PaintingEdge::Right => (
+                (left, top),
+                Some((
+                    (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH),
+                    bottom,
+                )),
+            ),
+            PaintingEdge::Top => (
+                (left, (top + delta_y).min(bottom - MIN_PAINTING_EDGE_LENGTH)),
+                Some((right, bottom)),
+            ),
+            PaintingEdge::Bottom => (
+                (left, top),
+                Some((
+                    right,
+                    (bottom + delta_y).max(top + MIN_PAINTING_EDGE_LENGTH),
+                )),
+            ),
+        };
+    }
+
+    match edge {
+        PaintingEdge::Left => {
+            let new_left = (left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH);
+            let height = right - new_left;
+            let new_top = 1.0 - height / 2.0;
+            ((new_left, new_top), None)
+        }
+        PaintingEdge::Right => {
+            let new_right = (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH);
+            let height = new_right - left;
+            let new_top = 1.0 - height / 2.0;
+            ((left, new_top), None)
+        }
+        PaintingEdge::Top => {
+            let new_top = (top + delta_y).min(1.0 - MIN_PAINTING_EDGE_LENGTH / 2.0);
+            ((left, new_top), None)
+        }
+        PaintingEdge::Bottom => {
+            let new_bottom = (bottom + delta_y).max(1.0 + MIN_PAINTING_EDGE_LENGTH / 2.0);
+            ((left, 2.0 - new_bottom), None)
+        }
+    }
+}
+
 fn preview_pan_threshold_reached((delta_x, delta_y): (f64, f64)) -> bool {
     delta_x.hypot(delta_y) >= PREVIEW_PAN_DRAG_THRESHOLD_PX
 }
@@ -1268,9 +1425,10 @@ fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Opti
 #[cfg(test)]
 mod tests {
     use super::{
-        PreviewViewBox, default_preview_view_box, implicit_painting_bottom_right,
-        inverse_svg_transform_delta, inverse_svg_transform_point, preview_pan_threshold_reached,
-        translate_painting, wall_width, zoom_preview_view_box,
+        PaintingEdge, PreviewViewBox, default_preview_view_box, implicit_painting_bottom_right,
+        inverse_svg_transform_delta, inverse_svg_transform_point, painting_edge_at_point,
+        preview_pan_threshold_reached, resize_painting, translate_painting, wall_width,
+        zoom_preview_view_box,
     };
 
     #[test]
@@ -1351,5 +1509,115 @@ mod tests {
     fn preview_pan_threshold_ignores_click_jitter_but_accepts_drag_motion() {
         assert!(!preview_pan_threshold_reached((2.0, 2.0)));
         assert!(preview_pan_threshold_reached((3.0, 0.0)));
+    }
+
+    #[test]
+    fn painting_edge_hit_testing_uses_a_screen_pixel_threshold() {
+        assert_eq!(
+            painting_edge_at_point(
+                (0.0, 0.0, 2.0, 2.0),
+                (10.0, 0.0, 0.0, 10.0),
+                (0.5, 1.0),
+                6.0
+            ),
+            Some(PaintingEdge::Left)
+        );
+        assert_eq!(
+            painting_edge_at_point(
+                (0.0, 0.0, 2.0, 2.0),
+                (10.0, 0.0, 0.0, 10.0),
+                (1.0, 1.0),
+                6.0
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn custom_painting_edges_resize_without_moving_the_opposite_edges() {
+        assert_eq!(
+            resize_painting(
+                (0.5, 0.5),
+                Some((1.5, 1.5)),
+                PaintingEdge::Left,
+                (0.25, 0.0)
+            ),
+            ((0.75, 0.5), Some((1.5, 1.5)))
+        );
+        assert_eq!(
+            resize_painting(
+                (0.5, 0.5),
+                Some((1.5, 1.5)),
+                PaintingEdge::Bottom,
+                (0.0, 0.25)
+            ),
+            ((0.5, 0.5), Some((1.5, 1.75)))
+        );
+        assert_eq!(
+            resize_painting(
+                (0.5, 0.5),
+                Some((1.5, 1.5)),
+                PaintingEdge::Bottom,
+                (0.0, -0.25)
+            ),
+            ((0.5, 0.5), Some((1.5, 1.25)))
+        );
+        assert_eq!(
+            resize_painting(
+                (0.5, 0.5),
+                Some((1.5, 1.5)),
+                PaintingEdge::Right,
+                (0.25, 0.0)
+            ),
+            ((0.5, 0.5), Some((1.75, 1.5)))
+        );
+        assert_eq!(
+            resize_painting(
+                (0.5, 0.5),
+                Some((1.5, 1.5)),
+                PaintingEdge::Right,
+                (-0.25, 0.0)
+            ),
+            ((0.5, 0.5), Some((1.25, 1.5)))
+        );
+        assert_eq!(
+            resize_painting(
+                (0.5, 0.5),
+                Some((1.5, 1.5)),
+                PaintingEdge::Top,
+                (0.0, -0.25)
+            ),
+            ((0.5, 0.25), Some((1.5, 1.5)))
+        );
+    }
+
+    #[test]
+    fn implicit_painting_resizing_keeps_square_shape_and_balanced_vertical_gaps() {
+        let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Left, (-0.25, 0.0));
+        let (left, top) = resized.0;
+        let (right, bottom) = implicit_painting_bottom_right((left, top));
+
+        assert_eq!(resized.1, None);
+        assert_eq!(right - left, bottom - top);
+        assert_eq!(top, 1.0 - (bottom - top) / 2.0);
+
+        let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Top, (0.0, -0.25));
+        let (left, top) = resized.0;
+        let (right, bottom) = implicit_painting_bottom_right((left, top));
+        assert_eq!(top, 0.25);
+        assert_eq!(bottom, 1.75);
+        assert_eq!(right - left, bottom - top);
+
+        let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Right, (0.25, 0.0));
+        let (left, top) = resized.0;
+        let (right, bottom) = implicit_painting_bottom_right((left, top));
+        assert_eq!(right, 1.75);
+        assert_eq!(right - left, bottom - top);
+
+        let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Bottom, (0.0, 0.25));
+        let (left, top) = resized.0;
+        let (right, bottom) = implicit_painting_bottom_right((left, top));
+        assert_eq!(bottom, 1.75);
+        assert_eq!(right - left, bottom - top);
     }
 }

@@ -169,6 +169,14 @@
     cursor: grabbing;
 }
 
+.wall-preview-painting.resizing-horizontal {
+    cursor: ew-resize;
+}
+
+.wall-preview-painting.resizing-vertical {
+    cursor: ns-resize;
+}
+
 .wall-preview-painting:focus {
     outline: none;
 }
