@@ -33,6 +33,22 @@ struct PaintingDragStart {
     transform: (f64, f64, f64, f64),
 }
 
+#[derive(Clone, Copy)]
+struct PreviewViewBox {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Copy)]
+struct PreviewPanStart {
+    pointer_x: f64,
+    pointer_y: f64,
+    view_box: PreviewViewBox,
+    transform: (f64, f64, f64, f64),
+}
+
 impl Painting {
     pub fn new(
         key: usize,
@@ -332,44 +348,98 @@ pub fn LineInspector(
     let mobile_expanded = RwSignal::new(false);
     let active_painting_key = RwSignal::new(None::<usize>);
     let painting_drag_start = RwSignal::new(None::<PaintingDragStart>);
+    let preview_view_box = RwSignal::new(None::<PreviewViewBox>);
+    let preview_pan_start = RwSignal::new(None::<PreviewPanStart>);
 
     let painting_move_listener = window_event_listener(ev::pointermove, move |event| {
-        let Some(drag_start) = painting_drag_start.get_untracked() else {
-            return;
-        };
-        let screen_delta = (
-            f64::from(event.client_x()) - drag_start.pointer_x,
-            f64::from(event.client_y()) - drag_start.pointer_y,
-        );
-        let Some(delta) = inverse_svg_transform_delta(drag_start.transform, screen_delta) else {
-            return;
-        };
-        let (top_left, bottom_right) =
-            translate_painting(drag_start.top_left, drag_start.bottom_right, delta);
+        if let Some(drag_start) = painting_drag_start.get_untracked() {
+            let screen_delta = (
+                f64::from(event.client_x()) - drag_start.pointer_x,
+                f64::from(event.client_y()) - drag_start.pointer_y,
+            );
+            let Some(delta) = inverse_svg_transform_delta(drag_start.transform, screen_delta)
+            else {
+                return;
+            };
+            let (top_left, bottom_right) =
+                translate_painting(drag_start.top_left, drag_start.bottom_right, delta);
 
-        lines.with_untracked(|lines| {
-            if let Some(line) = lines.iter().find(|line| line.id == drag_start.line_id) {
-                let mut paintings = line.paintings_untracked();
-                if let Some(painting) = paintings
-                    .iter_mut()
-                    .find(|painting| painting.key() == drag_start.painting_key)
-                {
-                    painting.set_top_left(top_left);
-                    painting.set_bottom_right(bottom_right);
-                    line.set_paintings(paintings);
+            lines.with_untracked(|lines| {
+                if let Some(line) = lines.iter().find(|line| line.id == drag_start.line_id) {
+                    let mut paintings = line.paintings_untracked();
+                    if let Some(painting) = paintings
+                        .iter_mut()
+                        .find(|painting| painting.key() == drag_start.painting_key)
+                    {
+                        painting.set_top_left(top_left);
+                        painting.set_bottom_right(bottom_right);
+                        line.set_paintings(paintings);
+                    }
                 }
-            }
-        });
+            });
+        } else if let Some(pan_start) = preview_pan_start.get_untracked() {
+            let screen_delta = (
+                f64::from(event.client_x()) - pan_start.pointer_x,
+                f64::from(event.client_y()) - pan_start.pointer_y,
+            );
+            let Some(delta) = inverse_svg_transform_delta(pan_start.transform, screen_delta) else {
+                return;
+            };
+            preview_view_box.set(Some(PreviewViewBox {
+                x: pan_start.view_box.x - delta.0,
+                y: pan_start.view_box.y - delta.1,
+                ..pan_start.view_box
+            }));
+        }
     });
-    let stop_painting_drag = move |_| painting_drag_start.set(None);
-    let painting_up_listener = window_event_listener(ev::pointerup, stop_painting_drag);
-    let painting_cancel_listener =
-        window_event_listener(ev::pointercancel, move |_| painting_drag_start.set(None));
+    let stop_preview_drag = move |_| {
+        painting_drag_start.set(None);
+        preview_pan_start.set(None);
+    };
+    let preview_up_listener = window_event_listener(ev::pointerup, stop_preview_drag);
+    let preview_cancel_listener = window_event_listener(ev::pointercancel, move |_| {
+        painting_drag_start.set(None);
+        preview_pan_start.set(None);
+    });
 
     Effect::new(move |_| {
         let _ = selected_line.get();
         active_painting_key.set(None);
+        preview_view_box.set(None);
+        preview_pan_start.set(None);
     });
+
+    let selected = move || {
+        selected_line
+            .get()
+            .and_then(|id| lines.with(|lines| lines.iter().find(|line| line.id == id).copied()))
+    };
+    let selected_wall_width = move || {
+        selected()
+            .map(|line| wall_width(line.endpoints()))
+            .unwrap_or(0.01)
+            .max(0.01)
+    };
+    let get_preview_view_box = move || {
+        preview_view_box
+            .get()
+            .unwrap_or_else(|| default_preview_view_box(selected_wall_width()))
+    };
+    let zoom_preview = move |factor: f64| {
+        let current = get_preview_view_box();
+        let anchor = (
+            current.x + current.width / 2.0,
+            current.y + current.height / 2.0,
+        );
+        let base_width = selected_wall_width() + 0.05;
+        preview_view_box.set(Some(zoom_preview_view_box(
+            current,
+            anchor,
+            factor,
+            base_width / 100.0,
+            base_width,
+        )));
+    };
 
     let set_coordinate = move |is_start: bool, is_x: bool, value: String| {
         let (Some(id), Ok(value)) = (selected_line.get_untracked(), value.parse::<f64>()) else {
@@ -403,17 +473,6 @@ pub fn LineInspector(
         });
     };
 
-    let selected = move || {
-        selected_line
-            .get()
-            .and_then(|id| lines.with(|lines| lines.iter().find(|line| line.id == id).copied()))
-    };
-    let selected_wall_width = move || {
-        selected()
-            .map(|line| wall_width(line.endpoints()))
-            .unwrap_or(0.01)
-            .max(0.01)
-    };
     let set_texture = move |value: String| {
         let Some(id) = selected_line.get_untracked() else {
             return;
@@ -510,8 +569,8 @@ pub fn LineInspector(
 
     on_cleanup(move || {
         painting_move_listener.remove();
-        painting_up_listener.remove();
-        painting_cancel_listener.remove();
+        preview_up_listener.remove();
+        preview_cancel_listener.remove();
     });
 
     view! {
@@ -581,24 +640,119 @@ pub fn LineInspector(
                 </select>
             </section>
             <section class="endpoint-details wall-painting-preview">
-                <h3>"Wall preview"</h3>
+                <header class="wall-preview-heading">
+                    <h3>"Wall preview"</h3>
+                    <div class="wall-preview-controls" aria-label="Wall preview controls">
+                        <button
+                            type="button"
+                            aria-label="Zoom out wall preview"
+                            title="Zoom out"
+                            on:click=move |_| zoom_preview(1.25)
+                        >
+                            "−"
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="Zoom in wall preview"
+                            title="Zoom in"
+                            on:click=move |_| zoom_preview(0.8)
+                        >
+                            "+"
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="Reset wall preview zoom and pan"
+                            title="Reset view"
+                            on:click=move |_| preview_view_box.set(None)
+                        >
+                            "Reset"
+                        </button>
+                    </div>
+                </header>
                 <p>
                     {move || {
                         format!(
-                            "{:.2} × 2.0 wall units",
+                            "{:.2} × 2.0 wall units · Scroll to zoom, drag empty space to pan",
                             selected_wall_width()
                         )
                     }}
                 </p>
                 <svg
                     class="wall-preview-svg"
+                    class:panning=move || preview_pan_start.get().is_some()
                     role="group"
-                    aria-label="Wall preview. Click a painting to select it; drag to move it."
+                    aria-label="Wall preview. Scroll to zoom, drag empty space to pan, and drag a painting to move it."
                     viewBox=move || {
-                        let width = selected_wall_width();
-                        format!("-0.025 -0.025 {} 2.05", width + 0.05)
+                        let view_box = get_preview_view_box();
+                        format!(
+                            "{} {} {} {}",
+                            view_box.x, view_box.y, view_box.width, view_box.height
+                        )
                     }
                     preserveAspectRatio="xMidYMid meet"
+                    on:pointerdown=move |event: ev::PointerEvent| {
+                        if event.button() != 0 {
+                            return;
+                        }
+                        event.prevent_default();
+                        event.stop_propagation();
+                        let Some(target) = event.current_target().and_then(|target| {
+                            target.dyn_into::<leptos::web_sys::SvgGraphicsElement>().ok()
+                        }) else {
+                            return;
+                        };
+                        let Some(matrix) = target.get_screen_ctm() else {
+                            return;
+                        };
+                        preview_pan_start.set(Some(PreviewPanStart {
+                            pointer_x: f64::from(event.client_x()),
+                            pointer_y: f64::from(event.client_y()),
+                            view_box: get_preview_view_box(),
+                            transform: (
+                                f64::from(matrix.a()),
+                                f64::from(matrix.b()),
+                                f64::from(matrix.c()),
+                                f64::from(matrix.d()),
+                            ),
+                        }));
+                    }
+                    on:wheel=move |event: ev::WheelEvent| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        let Some(target) = event.current_target().and_then(|target| {
+                            target.dyn_into::<leptos::web_sys::SvgGraphicsElement>().ok()
+                        }) else {
+                            return;
+                        };
+                        let Some(matrix) = target.get_screen_ctm() else {
+                            return;
+                        };
+                        let view_box = get_preview_view_box();
+                        let Some(anchor) = inverse_svg_transform_point(
+                            (
+                                f64::from(matrix.a()),
+                                f64::from(matrix.b()),
+                                f64::from(matrix.c()),
+                                f64::from(matrix.d()),
+                                f64::from(matrix.e()),
+                                f64::from(matrix.f()),
+                            ),
+                            (
+                                f64::from(event.client_x()),
+                                f64::from(event.client_y()),
+                            ),
+                        ) else {
+                            return;
+                        };
+                        let base_width = selected_wall_width() + 0.05;
+                        preview_view_box.set(Some(zoom_preview_view_box(
+                            view_box,
+                            anchor,
+                            if event.delta_y() < 0.0 { 0.8 } else { 1.25 },
+                            base_width / 100.0,
+                            base_width,
+                        )));
+                    }
                 >
                     <rect
                         class="wall-preview-surface"
@@ -1012,6 +1166,35 @@ fn wall_width(((start_x, start_y), (end_x, end_y)): ((f64, f64), (f64, f64))) ->
     (end_x - start_x).hypot(end_y - start_y)
 }
 
+fn default_preview_view_box(wall_width: f64) -> PreviewViewBox {
+    PreviewViewBox {
+        x: -0.025,
+        y: -0.025,
+        width: wall_width + 0.05,
+        height: 2.05,
+    }
+}
+
+fn zoom_preview_view_box(
+    view_box: PreviewViewBox,
+    (anchor_x, anchor_y): (f64, f64),
+    factor: f64,
+    min_width: f64,
+    max_width: f64,
+) -> PreviewViewBox {
+    let width = (view_box.width * factor).clamp(min_width, max_width);
+    let scale = width / view_box.width;
+    let height = view_box.height * scale;
+    let anchor_ratio_x = (anchor_x - view_box.x) / view_box.width;
+    let anchor_ratio_y = (anchor_y - view_box.y) / view_box.height;
+    PreviewViewBox {
+        x: anchor_x - anchor_ratio_x * width,
+        y: anchor_y - anchor_ratio_y * height,
+        width,
+        height,
+    }
+}
+
 fn inverse_svg_transform_delta(
     (a, b, c, d): (f64, f64, f64, f64),
     (screen_x, screen_y): (f64, f64),
@@ -1024,6 +1207,13 @@ fn inverse_svg_transform_delta(
         (d * screen_x - c * screen_y) / determinant,
         (-b * screen_x + a * screen_y) / determinant,
     ))
+}
+
+fn inverse_svg_transform_point(
+    (a, b, c, d, e, f): (f64, f64, f64, f64, f64, f64),
+    (screen_x, screen_y): (f64, f64),
+) -> Option<(f64, f64)> {
+    inverse_svg_transform_delta((a, b, c, d), (screen_x - e, screen_y - f))
 }
 
 fn translate_painting(
@@ -1056,7 +1246,9 @@ fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Opti
 #[cfg(test)]
 mod tests {
     use super::{
-        implicit_painting_bottom_right, inverse_svg_transform_delta, translate_painting, wall_width,
+        PreviewViewBox, default_preview_view_box, implicit_painting_bottom_right,
+        inverse_svg_transform_delta, inverse_svg_transform_point, translate_painting, wall_width,
+        zoom_preview_view_box,
     };
 
     #[test]
@@ -1096,6 +1288,40 @@ mod tests {
         assert_eq!(
             inverse_svg_transform_delta((1.0, 0.0, 0.0, 0.0), (1.0, 1.0)),
             None
+        );
+    }
+
+    #[test]
+    fn preview_zoom_keeps_the_pointer_anchor_fixed() {
+        let initial = PreviewViewBox {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 2.0,
+        };
+        let zoomed = zoom_preview_view_box(initial, (2.0, 1.0), 0.5, 0.01, 10.0);
+
+        assert_eq!(zoomed.width, 5.0);
+        assert_eq!(zoomed.height, 1.0);
+        assert_eq!(zoomed.x, 1.0);
+        assert_eq!(zoomed.y, 0.5);
+    }
+
+    #[test]
+    fn preview_zoom_respects_minimum_and_maximum_scale() {
+        let initial = default_preview_view_box(10.0);
+        let minimum = zoom_preview_view_box(initial, (0.0, 0.0), 0.001, 0.1, 10.05);
+        let maximum = zoom_preview_view_box(initial, (0.0, 0.0), 100.0, 0.1, 10.05);
+
+        assert_eq!(minimum.width, 0.1);
+        assert_eq!(maximum.width, 10.05);
+    }
+
+    #[test]
+    fn screen_point_conversion_accounts_for_svg_translation() {
+        assert_eq!(
+            inverse_svg_transform_point((10.0, 0.0, 0.0, 10.0, 100.0, 50.0), (120.0, 80.0)),
+            Some((2.0, 3.0))
         );
     }
 }

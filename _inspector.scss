@@ -95,12 +95,46 @@
     font-variant-numeric: tabular-nums;
 }
 
+.wall-preview-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.wall-preview-heading h3 {
+    margin: 0;
+}
+
+.wall-preview-controls {
+    display: flex;
+    gap: 4px;
+}
+
+.wall-preview-controls button {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 3px 6px;
+    border: 1px solid #c8d0cb;
+    border-radius: 3px;
+    background: #fff;
+    color: #20332c;
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.wall-preview-controls button:hover {
+    background: #e4e9e5;
+}
+
 .wall-preview-svg {
     display: block;
     box-sizing: border-box;
     width: 100%;
     height: 150px;
-    padding: 8px;
+    padding: 0;
     border: 1px solid #c8d0cb;
     border-radius: 3px;
     background:
@@ -109,6 +143,12 @@
         #fbfcfb;
     background-position: 0 0, 8px 8px;
     background-size: 16px 16px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.wall-preview-svg.panning {
+    cursor: grabbing;
 }
 
 .wall-preview-surface {
