@@ -51,6 +51,31 @@
     background: #c66a2b;
 }
 
+.painting-indicators {
+    position: absolute;
+    z-index: 1;
+    transform-origin: center;
+    pointer-events: none;
+}
+
+.painting-indicator {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    border-radius: 1px;
+    background: #9e392d;
+    opacity: 0.85;
+}
+
+.painting-indicator-front {
+    top: 0;
+}
+
+.painting-indicator-back {
+    top: 10px;
+}
+
 .world-line::before {
     position: absolute;
     inset: -8px 0;

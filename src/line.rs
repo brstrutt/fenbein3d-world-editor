@@ -331,6 +331,44 @@ pub fn WorldLine(
                     active_line.set(Some(id));
                 }
             />
+            <div
+                class="painting-indicators"
+                aria-hidden="true"
+                hidden=move || line.paintings().is_empty()
+                style:left=move || {
+                    let ((start_x, _), (end_x, _)) = line.endpoints();
+                    let (_, _, length, _) = line_geometry();
+                    let (pan_x, _) = scene_offset.get();
+                    let center_x = (start_x + end_x) / 2.0;
+                    let marker_width = (length * WORLD_UNIT_PX * zoom.get() * 0.25)
+                        .clamp(8.0, 32.0);
+                    format!(
+                        "calc(50% + {}px)",
+                        pan_x + center_x * WORLD_UNIT_PX * zoom.get() - marker_width / 2.0
+                    )
+                }
+                style:top=move || {
+                    let ((_, start_y), (_, end_y)) = line.endpoints();
+                    let (_, pan_y) = scene_offset.get();
+                    let center_y = (start_y + end_y) / 2.0;
+                    format!(
+                        "calc(50% + {}px - 6px)",
+                        pan_y + center_y * WORLD_UNIT_PX * zoom.get()
+                    )
+                }
+                style:width=move || {
+                    let (_, _, length, _) = line_geometry();
+                    format!(
+                        "{}px",
+                        (length * WORLD_UNIT_PX * zoom.get() * 0.25).clamp(8.0, 32.0)
+                    )
+                }
+                style:height="12px"
+                style:transform=move || format!("rotate({}deg)", line_geometry().3)
+            >
+                <span class="painting-indicator painting-indicator-front"></span>
+                <span class="painting-indicator painting-indicator-back"></span>
+            </div>
             <button
                 class="line-endpoint"
                 class:dragging=move || active_endpoint.get() == Some((id, true))
