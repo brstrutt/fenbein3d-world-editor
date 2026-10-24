@@ -2,6 +2,7 @@ use leptos::{ev, prelude::*, wasm_bindgen::JsCast};
 use serde_json::{Value, json};
 
 pub const WORLD_UNIT_PX: f64 = 32.0;
+const PREVIEW_PAN_DRAG_THRESHOLD_PX: f64 = 3.0;
 
 #[derive(Clone, Copy)]
 pub struct Line {
@@ -47,6 +48,7 @@ struct PreviewPanStart {
     pointer_y: f64,
     view_box: PreviewViewBox,
     transform: (f64, f64, f64, f64),
+    moved: bool,
 }
 
 impl Painting {
@@ -382,9 +384,16 @@ pub fn LineInspector(
                 f64::from(event.client_x()) - pan_start.pointer_x,
                 f64::from(event.client_y()) - pan_start.pointer_y,
             );
+            if !pan_start.moved && !preview_pan_threshold_reached(screen_delta) {
+                return;
+            }
             let Some(delta) = inverse_svg_transform_delta(pan_start.transform, screen_delta) else {
                 return;
             };
+            preview_pan_start.set(Some(PreviewPanStart {
+                moved: true,
+                ..pan_start
+            }));
             preview_view_box.set(Some(PreviewViewBox {
                 x: pan_start.view_box.x - delta.0,
                 y: pan_start.view_box.y - delta.1,
@@ -393,6 +402,12 @@ pub fn LineInspector(
         }
     });
     let stop_preview_drag = move |_| {
+        if preview_pan_start
+            .get_untracked()
+            .is_some_and(|pan_start| !pan_start.moved)
+        {
+            active_painting_key.set(None);
+        }
         painting_drag_start.set(None);
         preview_pan_start.set(None);
     };
@@ -679,7 +694,9 @@ pub fn LineInspector(
                 </p>
                 <svg
                     class="wall-preview-svg"
-                    class:panning=move || preview_pan_start.get().is_some()
+                    class:panning=move || {
+                        preview_pan_start.get().is_some_and(|pan_start| pan_start.moved)
+                    }
                     role="group"
                     aria-label="Wall preview. Scroll to zoom, drag empty space to pan, and drag a painting to move it."
                     viewBox=move || {
@@ -714,6 +731,7 @@ pub fn LineInspector(
                                 f64::from(matrix.c()),
                                 f64::from(matrix.d()),
                             ),
+                            moved: false,
                         }));
                     }
                     on:wheel=move |event: ev::WheelEvent| {
@@ -1216,6 +1234,10 @@ fn inverse_svg_transform_point(
     inverse_svg_transform_delta((a, b, c, d), (screen_x - e, screen_y - f))
 }
 
+fn preview_pan_threshold_reached((delta_x, delta_y): (f64, f64)) -> bool {
+    delta_x.hypot(delta_y) >= PREVIEW_PAN_DRAG_THRESHOLD_PX
+}
+
 fn translate_painting(
     (left, top): (f64, f64),
     bottom_right: Option<(f64, f64)>,
@@ -1247,8 +1269,8 @@ fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Opti
 mod tests {
     use super::{
         PreviewViewBox, default_preview_view_box, implicit_painting_bottom_right,
-        inverse_svg_transform_delta, inverse_svg_transform_point, translate_painting, wall_width,
-        zoom_preview_view_box,
+        inverse_svg_transform_delta, inverse_svg_transform_point, preview_pan_threshold_reached,
+        translate_painting, wall_width, zoom_preview_view_box,
     };
 
     #[test]
@@ -1323,5 +1345,11 @@ mod tests {
             inverse_svg_transform_point((10.0, 0.0, 0.0, 10.0, 100.0, 50.0), (120.0, 80.0)),
             Some((2.0, 3.0))
         );
+    }
+
+    #[test]
+    fn preview_pan_threshold_ignores_click_jitter_but_accepts_drag_motion() {
+        assert!(!preview_pan_threshold_reached((2.0, 2.0)));
+        assert!(preview_pan_threshold_reached((3.0, 0.0)));
     }
 }
