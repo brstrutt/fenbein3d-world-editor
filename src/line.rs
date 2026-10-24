@@ -1407,28 +1407,51 @@ fn resize_painting(
 ) -> ((f64, f64), Option<(f64, f64)>) {
     let (right, bottom) =
         bottom_right.unwrap_or_else(|| implicit_painting_bottom_right((left, top)));
+    if bottom_right.is_none()
+        && match edge {
+            PaintingEdge::Left | PaintingEdge::Right => delta_x == 0.0,
+            PaintingEdge::Top | PaintingEdge::Bottom => delta_y == 0.0,
+        }
+    {
+        return ((left, top), None);
+    }
     if bottom_right.is_some() {
         return match edge {
             PaintingEdge::Left => (
-                ((left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH), top),
+                (
+                    snap_changed_coordinate(
+                        left,
+                        (left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH),
+                    ),
+                    top,
+                ),
                 Some((right, bottom)),
             ),
             PaintingEdge::Right => (
                 (left, top),
                 Some((
-                    (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH),
+                    snap_changed_coordinate(
+                        right,
+                        (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH),
+                    ),
                     bottom,
                 )),
             ),
-            PaintingEdge::Top => (
-                (left, (top + delta_y).min(bottom - MIN_PAINTING_EDGE_LENGTH)),
-                Some((right, bottom)),
-            ),
+            PaintingEdge::Top => {
+                let new_top = snap_changed_coordinate(
+                    top,
+                    (top + delta_y).min(bottom - MIN_PAINTING_EDGE_LENGTH),
+                );
+                ((left, new_top), Some((right, bottom)))
+            }
             PaintingEdge::Bottom => (
                 (left, top),
                 Some((
                     right,
-                    (bottom + delta_y).max(top + MIN_PAINTING_EDGE_LENGTH),
+                    snap_changed_coordinate(
+                        bottom,
+                        (bottom + delta_y).max(top + MIN_PAINTING_EDGE_LENGTH),
+                    ),
                 )),
             ),
         };
@@ -1436,26 +1459,50 @@ fn resize_painting(
 
     match edge {
         PaintingEdge::Left => {
-            let new_left = (left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH);
+            let new_left = snap_changed_coordinate(
+                left,
+                (left + delta_x).min(right - MIN_PAINTING_EDGE_LENGTH),
+            );
             let height = right - new_left;
-            let new_top = 1.0 - height / 2.0;
+            let new_top = snap_changed_coordinate(top, 1.0 - height / 2.0);
             ((new_left, new_top), None)
         }
         PaintingEdge::Right => {
-            let new_right = (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH);
+            let new_right = snap_changed_coordinate(
+                right,
+                (right + delta_x).max(left + MIN_PAINTING_EDGE_LENGTH),
+            );
             let height = new_right - left;
-            let new_top = 1.0 - height / 2.0;
+            let new_top = snap_changed_coordinate(top, 1.0 - height / 2.0);
             ((left, new_top), None)
         }
         PaintingEdge::Top => {
-            let new_top = (top + delta_y).min(1.0 - MIN_PAINTING_EDGE_LENGTH / 2.0);
+            let new_top = snap_changed_coordinate(
+                top,
+                (top + delta_y).min(1.0 - MIN_PAINTING_EDGE_LENGTH / 2.0),
+            );
             ((left, new_top), None)
         }
         PaintingEdge::Bottom => {
-            let new_bottom = (bottom + delta_y).max(1.0 + MIN_PAINTING_EDGE_LENGTH / 2.0);
-            ((left, 2.0 - new_bottom), None)
+            let new_bottom = snap_changed_coordinate(
+                bottom,
+                (bottom + delta_y).max(1.0 + MIN_PAINTING_EDGE_LENGTH / 2.0),
+            );
+            ((left, snap_changed_coordinate(top, 2.0 - new_bottom)), None)
         }
     }
+}
+
+fn snap_changed_coordinate(original: f64, updated: f64) -> f64 {
+    if original == updated {
+        original
+    } else {
+        snap_preview_coordinate(updated)
+    }
+}
+
+fn snap_preview_coordinate(coordinate: f64) -> f64 {
+    (coordinate * 100.0).round() / 100.0
 }
 
 fn preview_pan_threshold_reached((delta_x, delta_y): (f64, f64)) -> bool {
@@ -1469,10 +1516,16 @@ fn translate_painting(
 ) -> ((f64, f64), Option<(f64, f64)>) {
     match bottom_right {
         Some((right, bottom)) => (
-            (left + delta_x, top + delta_y),
-            Some((right + delta_x, bottom + delta_y)),
+            (
+                snap_changed_coordinate(left, left + delta_x),
+                snap_changed_coordinate(top, top + delta_y),
+            ),
+            Some((
+                snap_changed_coordinate(right, right + delta_x),
+                snap_changed_coordinate(bottom, bottom + delta_y),
+            )),
         ),
-        None => ((left + delta_x, top), None),
+        None => ((snap_changed_coordinate(left, left + delta_x), top), None),
     }
 }
 
@@ -1494,8 +1547,8 @@ mod tests {
     use super::{
         PaintingEdge, PreviewViewBox, default_preview_view_box, implicit_painting_bottom_right,
         inverse_svg_transform_delta, inverse_svg_transform_point, painting_edge_at_point,
-        preview_pan_threshold_reached, resize_painting, translate_painting, wall_width,
-        zoom_preview_view_box,
+        preview_pan_threshold_reached, resize_painting, snap_preview_coordinate,
+        translate_painting, wall_width, zoom_preview_view_box,
     };
 
     #[test]
@@ -1523,6 +1576,30 @@ mod tests {
         assert_eq!(
             translate_painting((0.5, 0.25), Some((1.5, 1.25)), (1.0, 0.75)),
             ((1.5, 1.0), Some((2.5, 2.0)))
+        );
+    }
+
+    #[test]
+    fn preview_coordinate_snap_uses_hundredths() {
+        assert_eq!(snap_preview_coordinate(0.014), 0.01);
+        assert_eq!(snap_preview_coordinate(0.015), 0.02);
+        assert_eq!(snap_preview_coordinate(-0.015), -0.02);
+    }
+
+    #[test]
+    fn preview_resizing_snaps_only_the_edge_being_adjusted() {
+        assert_eq!(
+            resize_painting(
+                (0.1234, 0.2345),
+                Some((1.2345, 1.4567)),
+                PaintingEdge::Right,
+                (0.121, 0.0)
+            ),
+            ((0.1234, 0.2345), Some((1.36, 1.4567)))
+        );
+        assert_eq!(
+            translate_painting((0.1234, 0.2345), Some((1.2345, 1.4567)), (0.0, 0.0)),
+            ((0.1234, 0.2345), Some((1.2345, 1.4567)))
         );
     }
 
@@ -1665,26 +1742,26 @@ mod tests {
         let (right, bottom) = implicit_painting_bottom_right((left, top));
 
         assert_eq!(resized.1, None);
-        assert_eq!(right - left, bottom - top);
-        assert_eq!(top, 1.0 - (bottom - top) / 2.0);
+        assert!((right - left - (bottom - top)).abs() < 1e-12);
+        assert!((top - (1.0 - (bottom - top) / 2.0)).abs() < 1e-12);
 
         let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Top, (0.0, -0.25));
         let (left, top) = resized.0;
         let (right, bottom) = implicit_painting_bottom_right((left, top));
         assert_eq!(top, 0.25);
         assert_eq!(bottom, 1.75);
-        assert_eq!(right - left, bottom - top);
+        assert!((right - left - (bottom - top)).abs() < 1e-12);
 
         let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Right, (0.25, 0.0));
         let (left, top) = resized.0;
         let (right, bottom) = implicit_painting_bottom_right((left, top));
-        assert_eq!(right, 1.75);
-        assert_eq!(right - left, bottom - top);
+        assert!((right - 1.74).abs() < 1e-12);
+        assert!((right - left - (bottom - top)).abs() < 1e-12);
 
         let resized = resize_painting((0.5, 0.5), None, PaintingEdge::Bottom, (0.0, 0.25));
         let (left, top) = resized.0;
         let (right, bottom) = implicit_painting_bottom_right((left, top));
         assert_eq!(bottom, 1.75);
-        assert_eq!(right - left, bottom - top);
+        assert!((right - left - (bottom - top)).abs() < 1e-12);
     }
 }
