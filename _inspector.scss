@@ -177,6 +177,14 @@
     cursor: ns-resize;
 }
 
+.wall-preview-painting.hovering-horizontal-edge {
+    cursor: ew-resize;
+}
+
+.wall-preview-painting.hovering-vertical-edge {
+    cursor: ns-resize;
+}
+
 .wall-preview-painting:focus {
     outline: none;
 }

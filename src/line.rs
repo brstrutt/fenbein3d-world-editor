@@ -365,6 +365,7 @@ pub fn LineInspector(
 ) -> impl IntoView {
     let mobile_expanded = RwSignal::new(false);
     let active_painting_key = RwSignal::new(None::<usize>);
+    let hovered_painting_edge = RwSignal::new(None::<(usize, PaintingEdge)>);
     let painting_drag_start = RwSignal::new(None::<PaintingDragStart>);
     let preview_view_box = RwSignal::new(None::<PreviewViewBox>);
     let preview_pan_start = RwSignal::new(None::<PreviewPanStart>);
@@ -870,6 +871,24 @@ pub fn LineInspector(
                                                 )
                                         })
                                     }
+                                    class:hovering-horizontal-edge=move || {
+                                        hovered_painting_edge.get().is_some_and(|(key, edge)| {
+                                            key == painting_key
+                                                && matches!(
+                                                    edge,
+                                                    PaintingEdge::Left | PaintingEdge::Right
+                                                )
+                                        })
+                                    }
+                                    class:hovering-vertical-edge=move || {
+                                        hovered_painting_edge.get().is_some_and(|(key, edge)| {
+                                            key == painting_key
+                                                && matches!(
+                                                    edge,
+                                                    PaintingEdge::Top | PaintingEdge::Bottom
+                                                )
+                                        })
+                                    }
                                     role="button"
                                     tabindex="0"
                                     aria-label=painting_label
@@ -885,6 +904,54 @@ pub fn LineInspector(
                                     }
                                     on:click=move |_| {
                                         active_painting_key.set(Some(painting_key))
+                                    }
+                                    on:pointermove=move |event: ev::PointerEvent| {
+                                        let Some(bounds) = painting_bounds() else {
+                                            return;
+                                        };
+                                        let Some(target) = event.current_target().and_then(|target| {
+                                            target
+                                                .dyn_into::<leptos::web_sys::SvgGraphicsElement>()
+                                                .ok()
+                                        }) else {
+                                            return;
+                                        };
+                                        let Some(matrix) = target.get_screen_ctm() else {
+                                            return;
+                                        };
+                                        let transform = (
+                                            f64::from(matrix.a()),
+                                            f64::from(matrix.b()),
+                                            f64::from(matrix.c()),
+                                            f64::from(matrix.d()),
+                                        );
+                                        let edge = inverse_svg_transform_point(
+                                            (
+                                                transform.0,
+                                                transform.1,
+                                                transform.2,
+                                                transform.3,
+                                                f64::from(matrix.e()),
+                                                f64::from(matrix.f()),
+                                            ),
+                                            (
+                                                f64::from(event.client_x()),
+                                                f64::from(event.client_y()),
+                                            ),
+                                        )
+                                        .and_then(|point| {
+                                            painting_edge_at_point(bounds, transform, point, 8.0)
+                                        });
+                                        hovered_painting_edge
+                                            .set(edge.map(|edge| (painting_key, edge)));
+                                    }
+                                    on:pointerleave=move |_| {
+                                        if hovered_painting_edge
+                                            .get_untracked()
+                                            .is_some_and(|(key, _)| key == painting_key)
+                                        {
+                                            hovered_painting_edge.set(None);
+                                        }
                                     }
                                     on:pointerdown=move |event: ev::PointerEvent| {
                                         if event.button() != 0 {
