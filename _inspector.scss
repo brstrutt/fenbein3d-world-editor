@@ -121,7 +121,12 @@
     fill: #d9975caa;
     stroke: #9e392d;
     stroke-width: 0.025;
-    cursor: pointer;
+    cursor: grab;
+    touch-action: none;
+}
+
+.wall-preview-painting.dragging {
+    cursor: grabbing;
 }
 
 .wall-preview-painting:focus {

@@ -1,4 +1,4 @@
-use leptos::{ev, prelude::*};
+use leptos::{ev, prelude::*, wasm_bindgen::JsCast};
 use serde_json::{Value, json};
 
 pub const WORLD_UNIT_PX: f64 = 32.0;
@@ -20,6 +20,17 @@ pub struct Painting {
     top_left: (f64, f64),
     bottom_right: Option<(f64, f64)>,
     source_data: Value,
+}
+
+#[derive(Clone)]
+struct PaintingDragStart {
+    line_id: usize,
+    painting_key: usize,
+    pointer_x: f64,
+    pointer_y: f64,
+    top_left: (f64, f64),
+    bottom_right: Option<(f64, f64)>,
+    transform: (f64, f64, f64, f64),
 }
 
 impl Painting {
@@ -320,6 +331,40 @@ pub fn LineInspector(
 ) -> impl IntoView {
     let mobile_expanded = RwSignal::new(false);
     let active_painting_key = RwSignal::new(None::<usize>);
+    let painting_drag_start = RwSignal::new(None::<PaintingDragStart>);
+
+    let painting_move_listener = window_event_listener(ev::pointermove, move |event| {
+        let Some(drag_start) = painting_drag_start.get_untracked() else {
+            return;
+        };
+        let screen_delta = (
+            f64::from(event.client_x()) - drag_start.pointer_x,
+            f64::from(event.client_y()) - drag_start.pointer_y,
+        );
+        let Some(delta) = inverse_svg_transform_delta(drag_start.transform, screen_delta) else {
+            return;
+        };
+        let (top_left, bottom_right) =
+            translate_painting(drag_start.top_left, drag_start.bottom_right, delta);
+
+        lines.with_untracked(|lines| {
+            if let Some(line) = lines.iter().find(|line| line.id == drag_start.line_id) {
+                let mut paintings = line.paintings_untracked();
+                if let Some(painting) = paintings
+                    .iter_mut()
+                    .find(|painting| painting.key() == drag_start.painting_key)
+                {
+                    painting.set_top_left(top_left);
+                    painting.set_bottom_right(bottom_right);
+                    line.set_paintings(paintings);
+                }
+            }
+        });
+    });
+    let stop_painting_drag = move |_| painting_drag_start.set(None);
+    let painting_up_listener = window_event_listener(ev::pointerup, stop_painting_drag);
+    let painting_cancel_listener =
+        window_event_listener(ev::pointercancel, move |_| painting_drag_start.set(None));
 
     Effect::new(move |_| {
         let _ = selected_line.get();
@@ -463,6 +508,12 @@ pub fn LineInspector(
     };
     let delete_selected = move |_| delete_selected_line(lines, selected_line);
 
+    on_cleanup(move || {
+        painting_move_listener.remove();
+        painting_up_listener.remove();
+        painting_cancel_listener.remove();
+    });
+
     view! {
         <aside
             class="line-inspector"
@@ -542,7 +593,7 @@ pub fn LineInspector(
                 <svg
                     class="wall-preview-svg"
                     role="group"
-                    aria-label="Wall preview. Click a painting to select it."
+                    aria-label="Wall preview. Click a painting to select it; drag to move it."
                     viewBox=move || {
                         let width = selected_wall_width();
                         format!("-0.025 -0.025 {} 2.05", width + 0.05)
@@ -598,6 +649,11 @@ pub fn LineInspector(
                                     class:selected=move || {
                                         active_painting_key.get() == Some(painting_key)
                                     }
+                                    class:dragging=move || {
+                                        painting_drag_start
+                                            .get()
+                                            .is_some_and(|drag| drag.painting_key == painting_key)
+                                    }
                                     role="button"
                                     tabindex="0"
                                     aria-label=painting_label
@@ -613,6 +669,56 @@ pub fn LineInspector(
                                     }
                                     on:click=move |_| {
                                         active_painting_key.set(Some(painting_key))
+                                    }
+                                    on:pointerdown=move |event: ev::PointerEvent| {
+                                        if event.button() != 0 {
+                                            return;
+                                        }
+                                        event.prevent_default();
+                                        event.stop_propagation();
+                                        active_painting_key.set(Some(painting_key));
+                                        let Some((top_left, bottom_right)) = lines.with_untracked(|lines| {
+                                            lines
+                                                .iter()
+                                                .find(|line| line.id == line_id)
+                                                .and_then(|line| {
+                                                    line.paintings_untracked()
+                                                        .into_iter()
+                                                        .find(|painting| painting.key() == painting_key)
+                                                        .map(|painting| {
+                                                            (painting.top_left(), painting.bottom_right())
+                                                        })
+                                                })
+                                        }) else {
+                                            return;
+                                        };
+                                        let Some(target) = event
+                                            .current_target()
+                                            .and_then(|target| {
+                                                target
+                                                    .dyn_into::<leptos::web_sys::SvgGraphicsElement>()
+                                                    .ok()
+                                            })
+                                        else {
+                                            return;
+                                        };
+                                        let Some(matrix) = target.get_screen_ctm() else {
+                                            return;
+                                        };
+                                        painting_drag_start.set(Some(PaintingDragStart {
+                                            line_id,
+                                            painting_key,
+                                            pointer_x: f64::from(event.client_x()),
+                                            pointer_y: f64::from(event.client_y()),
+                                            top_left,
+                                            bottom_right,
+                                            transform: (
+                                                f64::from(matrix.a()),
+                                                f64::from(matrix.b()),
+                                                f64::from(matrix.c()),
+                                                f64::from(matrix.d()),
+                                            ),
+                                        }));
                                     }
                                     on:keydown=move |event: ev::KeyboardEvent| {
                                         if event.key() == "Enter" || event.key() == " " {
@@ -906,6 +1012,34 @@ fn wall_width(((start_x, start_y), (end_x, end_y)): ((f64, f64), (f64, f64))) ->
     (end_x - start_x).hypot(end_y - start_y)
 }
 
+fn inverse_svg_transform_delta(
+    (a, b, c, d): (f64, f64, f64, f64),
+    (screen_x, screen_y): (f64, f64),
+) -> Option<(f64, f64)> {
+    let determinant = a * d - b * c;
+    if !determinant.is_finite() || determinant.abs() < f64::EPSILON {
+        return None;
+    }
+    Some((
+        (d * screen_x - c * screen_y) / determinant,
+        (-b * screen_x + a * screen_y) / determinant,
+    ))
+}
+
+fn translate_painting(
+    (left, top): (f64, f64),
+    bottom_right: Option<(f64, f64)>,
+    (delta_x, delta_y): (f64, f64),
+) -> ((f64, f64), Option<(f64, f64)>) {
+    match bottom_right {
+        Some((right, bottom)) => (
+            (left + delta_x, top + delta_y),
+            Some((right + delta_x, bottom + delta_y)),
+        ),
+        None => ((left + delta_x, top), None),
+    }
+}
+
 fn implicit_painting_bottom_right((left, top): (f64, f64)) -> (f64, f64) {
     let bottom = 2.0 - top;
     (left + bottom - top, bottom)
@@ -921,7 +1055,9 @@ fn delete_selected_line(lines: RwSignal<Vec<Line>>, selected_line: RwSignal<Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{implicit_painting_bottom_right, wall_width};
+    use super::{
+        implicit_painting_bottom_right, inverse_svg_transform_delta, translate_painting, wall_width,
+    };
 
     #[test]
     fn wall_preview_width_matches_line_length() {
@@ -933,5 +1069,33 @@ mod tests {
     fn implicit_painting_bottom_right_is_square_and_balanced_on_wall() {
         assert_eq!(implicit_painting_bottom_right((0.25, 0.5)), (1.25, 1.5));
         assert_eq!(implicit_painting_bottom_right((2.0, 0.0)), (4.0, 2.0));
+    }
+
+    #[test]
+    fn painting_drag_is_horizontal_without_custom_size() {
+        assert_eq!(
+            translate_painting((0.5, 0.25), None, (1.0, 0.75)),
+            ((1.5, 0.25), None)
+        );
+    }
+
+    #[test]
+    fn painting_drag_preserves_custom_size_and_allows_vertical_movement() {
+        assert_eq!(
+            translate_painting((0.5, 0.25), Some((1.5, 1.25)), (1.0, 0.75)),
+            ((1.5, 1.0), Some((2.5, 2.0)))
+        );
+    }
+
+    #[test]
+    fn svg_drag_delta_uses_the_inverse_screen_transform() {
+        assert_eq!(
+            inverse_svg_transform_delta((10.0, 0.0, 0.0, 10.0), (20.0, 30.0)),
+            Some((2.0, 3.0))
+        );
+        assert_eq!(
+            inverse_svg_transform_delta((1.0, 0.0, 0.0, 0.0), (1.0, 1.0)),
+            None
+        );
     }
 }
